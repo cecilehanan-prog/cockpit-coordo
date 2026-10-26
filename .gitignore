@@ -1,0 +1,8 @@
+# Jamais de données d'élèves dans ce dépôt public
+*.json
+*.jpeg
+*.jpg
+*.png
+*.pdf
+.DS_Store
+__pycache__/
