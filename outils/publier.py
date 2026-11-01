@@ -33,6 +33,11 @@ app, n1 = re.subn(r'^const QUESTIONS_INITIALES = \[.*\];$', 'const QUESTIONS_INI
 app, n2 = re.subn(r"^(\s*s\.questions = s\.questions \|\| )\[\{.*\}\];$", r'\1[];', app, count=1, flags=re.M)
 if n1 != 1 or n2 != 1:
     sys.exit("app.js a changé : les questions pré-remplies n'ont pas été trouvées, rien n'est publié.")
+# Les photos d'EDT (noms des AESH et des élèves) ne sont pas publiées : la version en ligne n'essaie pas de les afficher
+app, n3 = re.subn(r"return a\.edt \? \{ url: 'edt-aesh/' \+ encodeURIComponent\(a\.edt\), name: a\.edt \} : null; \};",
+                  "return null; }; /* version en ligne : les photos d'EDT restent sur le Mac */", app, count=1)
+if n3 != 1:
+    sys.exit("app.js a changé : l'affichage des EDT papier n'a pas été trouvé, rien n'est publié.")
 (DST / 'js/app.js').write_text(app, encoding='utf-8')
 
 # Données : fichiers vides (le cockpit démarre vide, puis on importe son JSON)
@@ -54,6 +59,9 @@ tete = ('<meta name="theme-color" content="#2f4f6b"><link rel="manifest" href="m
         '<meta name="apple-mobile-web-app-capable" content="yes"><link rel="apple-touch-icon" href="icon.svg">\n')
 html = html.replace('<link rel="stylesheet"', tete + '<link rel="stylesheet"', 1)
 html = html.replace('</body>', '<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");</script>\n</body>', 1)
+# Nouveau numéro de version à chaque publication : l'iPad et l'iPhone rechargent les fichiers modifiés
+import datetime
+html = re.sub(r'\?v=\w+', '?v=' + datetime.datetime.now().strftime('%Y%m%d%H%M'), html)
 (DST / 'index.html').write_text(html, encoding='utf-8')
 print('Cockpit copié sans données dans', DST)
 

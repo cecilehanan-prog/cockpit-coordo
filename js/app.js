@@ -217,7 +217,7 @@ function lienDoc(e, type, libelle) {
   if (!L.length) return `<span class="muted" title="Aucun ${libelle} dans le dossier de cet élève">—</span>`;
   return `<a href="javascript:ouvrirDoc(${L[0].i})" title="Ouvrir : ${esc(L[0].name)}${L.length > 1 ? ' (' + (L.length - 1) + ' autre' + (L.length > 2 ? 's' : '') + ' dans la fiche)' : ''}">${libelle}</a>${L.length > 1 ? ` <span class="muted">(${L.length})</span>` : ''}`;
 }
-const edtAesh = a => { const f = DOSS.edt.parAesh[a.id]; if (f) return { url: f.url, name: f.name }; return a.edt ? { url: 'edt-aesh/' + encodeURIComponent(a.edt), name: a.edt } : null; };
+const edtAesh = a => { const f = DOSS.edt.parAesh[a.id]; if (f) return { url: f.url, name: f.name }; return null; }; /* version en ligne : les photos d'EDT restent sur le Mac */
 // statut du dossier + date de dépôt quand le dossier est déposé (« Dossier renouvellement déposé AESHm — déposé le … »)
 // Pastille de validité de la notification (même présentation que le tableau « Décisions MDPH / PPS ») : en cours / échue / échue avec renouvellement déposé
 function pastilleValidite(e, court = false) {
