@@ -10,6 +10,8 @@ const APP = () => window.cockpitSync; // fourni par app.js : { cle, appliquer(d)
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
 const L = { cle: 'cockpit-sync-cle', sel: 'cockpit-sync-sel', vu: 'cockpit-sync-vu', copie: 'cockpit-pas-v1-copie-avant-synchro' };
 const ITER = 600000;
+const VERSION = '2026-11-02a'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
+let distant = null; // { appareil, savedAt } du dernier bloc vu en ligne
 const get = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const put = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
 const b64 = buf => { let s = ''; const a = new Uint8Array(buf); for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
@@ -32,13 +34,21 @@ async function chiffrer(texte, raw) {
   const c = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await cleAes(raw), gz || brut);
   return { iv: b64(iv), data: b64(c), gz: !!gz };
 }
+// Étape 1 : AES seul. S'il réussit, la phrase est la bonne (un mauvais mot de passe échoue ici, nulle part ailleurs).
+const ouvrir = async (doc, raw) => new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(doc.iv) }, await cleAes(raw), unb64(doc.data)));
+// Étape 2 : décompression. Les vieux iPad / iPhone (avant iOS 16.4) n'ont pas DecompressionStream : on charge alors fflate.
+async function decompresser(p) {
+  if (typeof DecompressionStream !== 'undefined') { try { return await flux(p, window.DecompressionStream); } catch {} }
+  if (!window.fflate) await charger('https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js');
+  return window.fflate.gunzipSync(p);
+}
 async function dechiffrer(doc, raw) {
-  const p = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(doc.iv) }, await cleAes(raw), unb64(doc.data)));
-  if (doc.gz && typeof DecompressionStream === 'undefined') throw new Error('Mets à jour iPadOS / iOS (16.4 ou plus) pour lire la synchro sur cet appareil.');
-  return new TextDecoder().decode(doc.gz ? await flux(p, window.DecompressionStream) : p);
+  const p = await ouvrir(doc, raw);
+  return new TextDecoder().decode(doc.gz ? await decompresser(p) : p);
 }
 
 /* ---------- interface ---------- */
+const quand = t => { try { return t ? new Date(t).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '?'; } catch { return String(t); } };
 let etat = 'off', message = '', utilisateur = null;
 function dire(e, m) {
   etat = e; if (m != null) message = m;
@@ -70,6 +80,7 @@ function fenetre() {
         <button class="btn" type="button" id="sync-reset" hidden>J'ai oublié ma phrase : recommencer depuis cet appareil</button>
       </form>`}
     <p class="small" id="sync-msg" style="margin-top:10px">${message}</p>
+    <p class="small muted" style="margin:4px 0 0">Version ${VERSION}${distant ? ` · dernier envoi en ligne : ${String(distant.appareil || '?').replace(/[<>&]/g, '')}, ${quand(distant.savedAt)}` : ''}</p>
     <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="sync-fermer">Fermer</button></div></div>`;
   document.body.appendChild(w);
   w.querySelector('#sync-fermer').onclick = () => w.remove();
@@ -116,14 +127,14 @@ async function connecter(mail, mdp, phrase) {
   try {
     const u = (await auth.signInWithEmailAndPassword(mail, mdp)).user;
     const ref = firebase.firestore().collection('coffres').doc(u.uid).collection('cockpit').doc('etat');
-    const d = (await ref.get()).data();
+    const d = (await ref.get()).data(); if (d) distant = { appareil: d.appareil, savedAt: d.savedAt };
     if (!(d && d.data)) { const sel0 = crypto.getRandomValues(new Uint8Array(16)); dire('cours', 'Préparation de la clé (quelques secondes)…'); return brancher(u, ref, await deriver(phrase.trim(), sel0), sel0); }
     const sel = unb64(d.sel);
     const essais = variantes(phrase);
     for (let i = 0; i < essais.length; i++) {
       dire('cours', `Vérification de la phrase secrète${essais.length > 1 ? ` (${i + 1}/${essais.length})` : ''}…`);
       const raw = await deriver(essais[i], sel);
-      try { await dechiffrer(d, raw); return brancher(u, ref, raw, sel); } catch {}
+      try { await ouvrir(d, raw); return brancher(u, ref, raw, sel); } catch {}
     }
     enAttente = { u, ref, phrase: phrase.trim() };
     dire('err', "Cette phrase secrète ne correspond pas à celle déjà utilisée. Vérifie-la (majuscules, accents). Si tu l'as oubliée, tu peux recommencer depuis l'appareil qui a les bonnes données (ton Mac).");
@@ -157,6 +168,7 @@ async function deconnecter() {
   document.getElementById('sync-modal')?.remove(); dire('off', "Cet appareil n'est plus synchronisé. Ses données restent dessus.");
 }
 async function recevoir(d) {
+  if (d) distant = { appareil: d.appareil, savedAt: d.savedAt };
   const raw = get(L.cle); if (!raw) return;
   const local = get(APP().cle), lAt = savedAt(local), vu = get(L.vu) || '';
   if (!d || !d.data) { pret = true; return envoyer(); } // espace vide : cet appareil l'initialise
@@ -166,7 +178,8 @@ async function recevoir(d) {
   const localModifie = lAt && lAt !== vu;
   const premiere = !vu; // premier branchement de cet appareil : l'espace déjà rempli fait foi (copie locale gardée)
   if (premiere || d.savedAt > lAt || !localModifie) {
-    let texte; try { texte = await dechiffrer(d, unb64(raw)); } catch { return dire('err', 'Impossible de déchiffrer : vérifie ta phrase secrète (déconnecte puis reconnecte cet appareil).'); }
+    let p; try { p = await ouvrir(d, unb64(raw)); } catch { return dire('err', 'Impossible de déchiffrer : vérifie ta phrase secrète (déconnecte puis reconnecte cet appareil).'); }
+    let texte; try { texte = new TextDecoder().decode(d.gz ? await decompresser(p) : p); } catch (e) { return dire('err', "La phrase est bonne, mais cet appareil n'arrive pas à décompresser les données (" + (e.message || e) + '). Vérifie la connexion internet puis recharge la page.'); }
     if ((localModifie || premiere) && local) put(L.copie, local); // les deux appareils ont changé : on garde une copie de celui-ci
     applique = true; try { APP().appliquer(JSON.parse(texte)); } finally { applique = false; }
     put(L.vu, d.savedAt);

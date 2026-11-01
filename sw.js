@@ -1,5 +1,5 @@
 // Garde le cockpit disponible hors connexion. Les données, elles, restent dans le navigateur (localStorage).
-const CACHE = "cockpit-coordo-v2";
+const CACHE = "cockpit-coordo-v3";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icon.svg"];
 self.addEventListener("install", e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener("activate", e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
