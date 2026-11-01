@@ -133,9 +133,10 @@ async function recevoir(d) {
   pret = true;
   if (d.savedAt === lAt) { put(L.vu, d.savedAt); return dire('ok', 'Tout est à jour.'); }
   const localModifie = lAt && lAt !== vu;
-  if (d.savedAt > lAt || !localModifie) {
+  const premiere = !vu; // premier branchement de cet appareil : l'espace déjà rempli fait foi (copie locale gardée)
+  if (premiere || d.savedAt > lAt || !localModifie) {
     let texte; try { texte = await dechiffrer(d, unb64(raw)); } catch { return dire('err', 'Impossible de déchiffrer : vérifie ta phrase secrète (déconnecte puis reconnecte cet appareil).'); }
-    if (localModifie && local) put(L.copie, local); // les deux appareils ont changé : on garde une copie de celui-ci
+    if ((localModifie || premiere) && local) put(L.copie, local); // les deux appareils ont changé : on garde une copie de celui-ci
     applique = true; try { APP().appliquer(JSON.parse(texte)); } finally { applique = false; }
     put(L.vu, d.savedAt);
     dire('ok', localModifie ? 'Mis à jour depuis un autre appareil (une copie de la version de cet appareil est gardée).' : 'Mis à jour depuis un autre appareil.');
