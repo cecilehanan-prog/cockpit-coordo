@@ -67,12 +67,14 @@ function fenetre() {
         <label>Mot de passe Firebase<br><input type="password" id="sync-mdp" required autocomplete="current-password" style="width:100%"></label>
         <label>Phrase secrète (au moins 12 caractères, la même sur tous tes appareils)<br><input type="password" id="sync-phrase" required minlength="12" autocomplete="off" style="width:100%"></label>
         <button class="btn primary" type="submit">Connecter cet appareil</button>
+        <button class="btn" type="button" id="sync-reset" hidden>J'ai oublié ma phrase : recommencer depuis cet appareil</button>
       </form>`}
     <p class="small" id="sync-msg" style="margin-top:10px">${message}</p>
     <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="sync-fermer">Fermer</button></div></div>`;
   document.body.appendChild(w);
   w.querySelector('#sync-fermer').onclick = () => w.remove();
   const f = w.querySelector('#sync-form'); if (f) f.onsubmit = e => { e.preventDefault(); connecter(f.querySelector('#sync-mail').value.trim(), f.querySelector('#sync-mdp').value, f.querySelector('#sync-phrase').value); };
+  const rz = w.querySelector('#sync-reset'); if (rz) { rz.onclick = recommencer; rz.hidden = !enAttente; }
   const o = w.querySelector('#sync-out'); if (o) o.onclick = deconnecter;
   const m = w.querySelector('#sync-maint'); if (m) m.onclick = () => envoyer(true);
 }
@@ -100,24 +102,53 @@ function ecouter(u) {
   dire('cours', 'Connectée avec ' + (u.email || '') + '.');
   arret = docRef.onSnapshot(s => recevoir(s.data()), () => dire('err', "Je n'arrive pas à lire ton espace Firebase (règles ?)."));
 }
+// L'iPad et l'iPhone remplacent souvent ' par ’ (et ajoutent parfois un espace) : on essaie ces variantes
+function variantes(p) {
+  const droit = p.replace(/[\u2018\u2019\u02BC]/g, "'").replace(/[\u201C\u201D\u00AB\u00BB]/g, '"');
+  const courbe = p.replace(/'/g, '\u2019');
+  return [...new Set([p, p.trim(), droit, droit.trim(), courbe, courbe.trim(), droit.trim().replace(/\s+/g, ' ')])];
+}
+let enAttente = null; // { u, ref, phrase } quand la phrase ne correspond pas
 async function connecter(mail, mdp, phrase) {
   if (!auth) return dire('err', "Firebase n'est pas encore chargé : vérifie la connexion internet.");
-  if (phrase.length < 12) return dire('err', 'La phrase secrète doit faire au moins 12 caractères.');
+  if (phrase.trim().length < 12) return dire('err', 'La phrase secrète doit faire au moins 12 caractères.');
   dire('cours', 'Connexion…');
   try {
     const u = (await auth.signInWithEmailAndPassword(mail, mdp)).user;
     const ref = firebase.firestore().collection('coffres').doc(u.uid).collection('cockpit').doc('etat');
     const d = (await ref.get()).data();
-    const sel = d && d.sel ? unb64(d.sel) : crypto.getRandomValues(new Uint8Array(16));
-    dire('cours', 'Préparation de la clé (quelques secondes)…');
-    const raw = await deriver(phrase, sel);
-    if (d && d.data) { try { await dechiffrer(d, raw); } catch { await auth.signOut(); return dire('err', "Cette phrase secrète ne correspond pas à celle de tes autres appareils."); } }
-    put(L.sel, b64(sel)); put(L.cle, b64(raw)); put(L.vu, null);
-    document.getElementById('sync-modal')?.remove();
-    ecouter(u);
+    if (!(d && d.data)) { const sel0 = crypto.getRandomValues(new Uint8Array(16)); dire('cours', 'Préparation de la clé (quelques secondes)…'); return brancher(u, ref, await deriver(phrase.trim(), sel0), sel0); }
+    const sel = unb64(d.sel);
+    const essais = variantes(phrase);
+    for (let i = 0; i < essais.length; i++) {
+      dire('cours', `Vérification de la phrase secrète${essais.length > 1 ? ` (${i + 1}/${essais.length})` : ''}…`);
+      const raw = await deriver(essais[i], sel);
+      try { await dechiffrer(d, raw); return brancher(u, ref, raw, sel); } catch {}
+    }
+    enAttente = { u, ref, phrase: phrase.trim() };
+    dire('err', "Cette phrase secrète ne correspond pas à celle déjà utilisée. Vérifie-la (majuscules, accents). Si tu l'as oubliée, tu peux recommencer depuis l'appareil qui a les bonnes données (ton Mac).");
+    const r = document.getElementById('sync-reset'); if (r) r.hidden = false;
   } catch (e) {
     dire('err', /password|credential|user/i.test(e.code || '') ? 'E-mail ou mot de passe Firebase incorrect.' : 'La connexion a échoué : ' + (e.code || e.message || 'réessaie'));
   }
+}
+async function brancher(u, ref, raw, sel) {
+  put(L.sel, b64(sel)); put(L.cle, b64(raw)); put(L.vu, null);
+  enAttente = null; document.getElementById('sync-modal')?.remove(); ecouter(u);
+}
+// Phrase oubliée : on repart de CET appareil, avec la nouvelle phrase (l'ancien bloc chiffré en ligne est remplacé)
+async function recommencer() {
+  if (!enAttente) return;
+  if (!confirm("Recommencer avec cette nouvelle phrase ?\n\nLes données de CET appareil deviendront la référence pour tous tes appareils. Fais-le depuis ton Mac, qui a les bonnes données.")) return;
+  const { u, ref, phrase } = enAttente;
+  dire('cours', 'Préparation de la nouvelle clé…');
+  const sel = crypto.getRandomValues(new Uint8Array(16)), raw = await deriver(phrase, sel);
+  const local = get(APP().cle); if (!local) return dire('err', "Cet appareil n'a pas de données à envoyer.");
+  const c = await chiffrer(local, raw);
+  await ref.set({ v: 1, sel: b64(sel), iv: c.iv, data: c.data, gz: c.gz, savedAt: savedAt(local), appareil: 'recommencé' });
+  put(L.sel, b64(sel)); put(L.cle, b64(raw)); put(L.vu, savedAt(local));
+  enAttente = null; document.getElementById('sync-modal')?.remove(); ecouter(u);
+  dire('ok', 'Nouvelle phrase en place. Reconnecte tes autres appareils avec elle.');
 }
 async function deconnecter() {
   put(L.cle, null); put(L.sel, null); put(L.vu, null);
