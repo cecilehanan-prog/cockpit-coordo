@@ -18,6 +18,10 @@ for rel in ['css/app.css', 'js/mopps-items.js']:
     (DST / rel).parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(SRC / rel, DST / rel)
 
+# css : la pastille de synchro, si absente du dossier du Mac
+with open(DST / 'css/app.css', encoding='utf-8') as f: _css = f.read()
+if '.sync-pill' not in _css:
+    with open(DST / 'css/app.css', 'a', encoding='utf-8') as f: f.write('\n/* Synchro chiffrée (js/sync.js) */\n.sync-pill{margin:6px 10px 0;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.06);color:#DCE3F0;font:inherit;font-size:11.5px;text-align:left;cursor:pointer}\n.sync-pill[data-etat=ok]{color:#8ED0A8}.sync-pill[data-etat=err]{color:#F2B8A0}\n')
 # css : sur iPad, le menu de gauche doit pouvoir défiler (dans l'appli Mac, la fenêtre est assez haute)
 with open(DST / 'css/app.css', 'a', encoding='utf-8') as f:
     f.write("\n/* Version en ligne (ajouté par outils/publier.py) : sur iPad, le menu de gauche doit pouvoir défiler,\n   et 100dvh suit la vraie hauteur de l'écran de Safari (barre d'adresse comprise). */\n#app{height:100vh;height:100dvh}\n.main{height:100vh;height:100dvh}\n.sidebar{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;min-height:0}\n")
@@ -33,6 +37,12 @@ app, n1 = re.subn(r'^const QUESTIONS_INITIALES = \[.*\];$', 'const QUESTIONS_INI
 app, n2 = re.subn(r"^(\s*s\.questions = s\.questions \|\| )\[\{.*\}\];$", r'\1[];', app, count=1, flags=re.M)
 if n1 != 1 or n2 != 1:
     sys.exit("app.js a changé : les questions pré-remplies n'ont pas été trouvées, rien n'est publié.")
+# Synchro chiffrée : le point d'accroche dans app.js (si le dossier du Mac ne l'a pas déjà)
+HOOK = 'window.cockpitSync = { cle: KEY, appliquer: d => { S = migrate(d); localStorage.setItem(KEY, JSON.stringify(S)); render(); } }; // synchro chiffrée (js/sync.js)\n'
+if 'window.cockpitSync' not in app:
+    if app.count("window.exportJSON = () =>") != 1:
+        sys.exit("app.js a changé : impossible d'y brancher la synchro, rien n'est publié.")
+    app = app.replace("window.exportJSON = () =>", HOOK + "window.exportJSON = () =>")
 # Les photos d'EDT (noms des AESH et des élèves) ne sont pas publiées : la version en ligne n'essaie pas de les afficher
 app, n3 = re.subn(r"return a\.edt \? \{ url: 'edt-aesh/' \+ encodeURIComponent\(a\.edt\), name: a\.edt \} : null; \};",
                   "return null; }; /* version en ligne : les photos d'EDT restent sur le Mac */", app, count=1)
@@ -59,6 +69,10 @@ tete = ('<meta name="theme-color" content="#2f4f6b"><link rel="manifest" href="m
         '<meta name="apple-mobile-web-app-capable" content="yes"><link rel="apple-touch-icon" href="icon.svg">\n')
 html = html.replace('<link rel="stylesheet"', tete + '<link rel="stylesheet"', 1)
 html = html.replace('</body>', '<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");</script>\n</body>', 1)
+if 'js/sync.js' not in html:
+    html = html.replace('<script src="js/app.js', '<script src="js/sync-config.js"></script>\n<script src="js/sync.js"></script>\n<script src="js/app.js', 1)
+    # sync.js doit venir APRÈS app.js : on remet l'ordre
+    html = re.sub(r'(<script src="js/sync-config\.js"></script>\n<script src="js/sync\.js"></script>\n)(<script src="js/app\.js[^>]*></script>)', r'\2\n\1', html)
 # Nouveau numéro de version à chaque publication : l'iPad et l'iPhone rechargent les fichiers modifiés
 import datetime
 html = re.sub(r'\?v=\w+', '?v=' + datetime.datetime.now().strftime('%Y%m%d%H%M'), html)

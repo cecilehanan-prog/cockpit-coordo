@@ -305,3 +305,7 @@ table.t tr.row.pole-gris:hover > td { background: rgba(110, 122, 145, .16); }
 #app{height:100vh;height:100dvh}
 .main{height:100vh;height:100dvh}
 .sidebar{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;min-height:0}
+
+/* Synchro chiffrée (js/sync.js) */
+.sync-pill{margin:6px 10px 0;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.06);color:#DCE3F0;font:inherit;font-size:11.5px;text-align:left;cursor:pointer}
+.sync-pill[data-etat=ok]{color:#8ED0A8}.sync-pill[data-etat=err]{color:#F2B8A0}

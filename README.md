@@ -23,3 +23,10 @@ python3 outils/publier.py "<chemin du dossier pas>"
 Le script recopie le code et remplace tous les fichiers de données par des fichiers vides,
 puis on enregistre (commit) et on envoie (push). Les fonctions propres au Mac (lecture des dossiers
 « Aménagements / Notifications » et « EDT AESH ») ne fonctionnent que dans l'appli Mac.
+
+## Synchronisation chiffrée (Mac, iPad, iPhone)
+
+`js/sync.js` chiffre toutes les données sur l'appareil (AES-GCM, clé tirée d'une phrase secrète) avant
+de les envoyer dans l'espace Firebase privé de Cécile. Firebase ne stocke qu'un bloc illisible.
+Elle s'active quand `js/sync-config.js` contient les identifiants (publics) du projet Firebase.
+Dans l'appli : menu de gauche › « Synchro », avec l'e-mail et le mot de passe Firebase et la phrase secrète.

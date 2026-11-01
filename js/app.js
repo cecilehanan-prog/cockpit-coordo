@@ -1704,6 +1704,7 @@ window.setCalLigne = (liste, i, k, v) => { S.calendrier[liste][i][k] = v; commit
 window.addCalLigne = liste => { S.calendrier[liste].push(liste === 'vacances' ? { nom: '', debut: '', fin: '' } : { nom: '', date: '' }); commit('param', `Calendrier : ligne ajoutée (${liste})`); };
 window.delCalLigne = (liste, i) => { S.calendrier[liste].splice(i, 1); commit('param', `Calendrier : ligne retirée (${liste})`); };
 window.nouvelleAnneeCalendrier = () => { if (!confirm('Vider les vacances et les jours fériés pour préparer la nouvelle année scolaire ? (les créneaux ne sont pas touchés)')) return; const an = prompt('Nouvelle année scolaire (ex. 2027-2028) :', ''); if (an === null) return; S.calendrier = { annee: an || '', refLundi: '', refQ: 'Q1', vacances: [], feries: [] }; commit('param', 'Calendrier : nouvelle année préparée'); };
+window.cockpitSync = { cle: KEY, appliquer: d => { S = migrate(d); localStorage.setItem(KEY, JSON.stringify(S)); render(); } }; // synchro chiffrée (js/sync.js)
 window.exportJSON = () => dl(`cockpit-pas_${S.annee}_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S, null, 1));
 window.importJSON = file => { if (!file) return; const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); if (!d.eleves || !d.aesh) throw 0; S = migrate(d); log('import', `JSON importé : ${file.name}`); save(); render(); toast('Import réussi'); } catch { alert('Fichier JSON invalide.'); } }; r.readAsText(file); };
 const csvLine = arr => arr.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(';');
