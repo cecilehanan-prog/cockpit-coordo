@@ -299,3 +299,9 @@ table.t tr.row.pole-gris:hover > td { background: rgba(110, 122, 145, .16); }
 }
 
 .pic{width:1.15em;height:1.15em;vertical-align:-.2em}
+
+/* Version en ligne (ajouté par outils/publier.py) : sur iPad, le menu de gauche doit pouvoir défiler,
+   et 100dvh suit la vraie hauteur de l'écran de Safari (barre d'adresse comprise). */
+#app{height:100vh;height:100dvh}
+.main{height:100vh;height:100dvh}
+.sidebar{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;min-height:0}

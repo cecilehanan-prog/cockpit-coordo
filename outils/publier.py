@@ -18,6 +18,10 @@ for rel in ['css/app.css', 'js/mopps-items.js']:
     (DST / rel).parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(SRC / rel, DST / rel)
 
+# css : sur iPad, le menu de gauche doit pouvoir défiler (dans l'appli Mac, la fenêtre est assez haute)
+with open(DST / 'css/app.css', 'a', encoding='utf-8') as f:
+    f.write("\n/* Version en ligne (ajouté par outils/publier.py) : sur iPad, le menu de gauche doit pouvoir défiler,\n   et 100dvh suit la vraie hauteur de l'écran de Safari (barre d'adresse comprise). */\n#app{height:100vh;height:100dvh}\n.main{height:100vh;height:100dvh}\n.sidebar{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;min-height:0}\n")
+
 # documents.js : un commentaire donnait en exemple le nom d'un élève
 doc = (SRC / 'js/documents.js').read_text(encoding='utf-8')
 doc = re.sub(r'« [A-Z]+ » ≈ « [A-Z]+ »', '« DUPOND » ≈ « DUPONT »', doc)
