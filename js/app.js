@@ -328,8 +328,15 @@ function migrate(s) {
   s.regles = Object.assign({ jours: true, horaires: true, niveaux: true }, s.regles || {}); delete s.regles.trou; delete s.regles.midi; // le comptage des trous a été supprimé
   return s;
 }
-function save() { S._savedAt = new Date().toISOString(); localStorage.setItem(KEY, JSON.stringify(S)); const f = document.getElementById('savestate'); if (f) f.textContent = 'Enregistré ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
+function save() { S._savedAt = new Date().toISOString(); const txt = JSON.stringify(S);
+  try { localStorage.setItem(KEY, txt); }
+  catch (err) { // mémoire du navigateur pleine : on allège le journal puis on réessaie ; sinon on le dit clairement
+    if (S.journal && S.journal.length > 200) { S.journal.length = 200; try { localStorage.setItem(KEY, JSON.stringify(S)); toast('Journal raccourci pour libérer de la place'); } catch (e2) { return erreurEnregistrement(e2); } }
+    else return erreurEnregistrement(err); }
+  const f = document.getElementById('savestate'); if (f) f.textContent = 'Enregistré ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function log(type, texte) { S.journal.unshift({ date: new Date().toISOString(), type, texte }); if (S.journal.length > 2000) S.journal.length = 2000; }
+function erreurEnregistrement(err) { console.error(err); const f = document.getElementById('savestate'); if (f) f.textContent = '⚠ Non enregistré';
+  alert("Attention : la modification est affichée mais n'a pas pu être enregistrée sur cet appareil (" + (err && (err.name || err.message) || err) + ").\nFais « Données & exports › Exporter JSON » pour ne rien perdre, puis préviens Claude."); }
 function commit(type, texte) { if (texte) log(type, texte); save(); render(); }
 window.printEdt = id => {
   const a = aesh(id); if (!a) return;
@@ -1985,7 +1992,9 @@ function modal(html, onSave, onDelete) {
   const m = $('#modal');
   m.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog"><form id="mform" onsubmit="return false">${html}<div class="acts">${onDelete ? '<button type="button" class="btn danger" id="m-del" style="margin-right:auto">Supprimer</button>' : ''}<button type="button" class="btn" onclick="closeModal()">Annuler</button><button type="submit" class="btn primary" id="m-ok">Enregistrer</button></div></form></div></div>`;
   const form = $('#mform');
-  $('#m-ok').onclick = ev => { ev.preventDefault(); const d = {}; new FormData(form).forEach((v, k) => d[k] = v); const r = onSave(d); if (r !== false) closeModal(); };
+  $('#m-ok').onclick = ev => { ev.preventDefault(); const d = {}; new FormData(form).forEach((v, k) => d[k] = v); let r;
+    try { r = onSave(d); } catch (err) { console.error(err); closeModal(); try { render(); } catch (e2) { } alert("Un problème est survenu pendant l'enregistrement : " + (err && err.message || err) + "\nVérifie la fiche ; si la modification n'apparaît pas, envoie ce message à Claude."); return; }
+    if (r !== false) closeModal(); };
   form.onsubmit = e => { e.preventDefault(); $('#m-ok').click(); };
   if (onDelete) $('#m-del').onclick = () => { onDelete(); closeModal(); };
   const first = form.querySelector('input,select'); if (first) first.focus();
