@@ -717,15 +717,22 @@ function candidatsRemplacement(cr) {
     .map(r => ({ id: r.aid, label: `${ST[r.st]} ${aesh(r.aid).nom}${r.R.length ? ' — ' + r.R.slice(0, 2).map(x => x[1]).join(', ') : ''}` }));
 }
 window.declarerAbsence = (aid = '') => {
-  const dispo = sortAesh(S.aesh.filter(a => !absente(a)));
+  verifierRetours(); // une absence terminée (date de fin passée) est close avant de proposer la liste
+  // Toutes les AESH sont proposées : une AESH déjà absente peut recevoir une nouvelle absence (ex. grève après un arrêt) ; l'ancienne est alors close.
+  const dispo = sortAesh(S.aesh.filter(a => !absente(a))).concat(sortAesh(S.aesh.filter(absente)));
   modal(`<h2>Déclarer une absence</h2><div class="form-grid">
-    <label class="f wide">AESH en absence<select name="aid">${dispo.map(a => `<option value="${a.id}" ${a.id === aid ? 'selected' : ''}>${esc(a.nom)}</option>`).join('')}</select></label>
+    <label class="f wide">AESH en absence<select name="aid">${dispo.map(a => `<option value="${a.id}" ${a.id === aid ? 'selected' : ''}>${esc(a.nom)}${absente(a) ? ` — déjà absente (${esc(String(a.statut).toLowerCase())}${a.absenceFin ? ' jusqu\'au ' + frDate(a.absenceFin) : ''})` : ''}</option>`).join('')}</select></label>
     <label class="f">Motif<select name="motif">${MOTIFS_ABSENCE.map(m => `<option>${m}</option>`).join('')}</select></label>
     <label class="f">À partir du<input type="date" name="debut" value="${aujourdhui()}" required></label>
     <label class="f">Jusqu'au (si connu)<input type="date" name="fin"></label></div>
     <p class="small muted">L'AESH repasse automatiquement « Actif » le lendemain de la date de fin.</p>`, d => {
-    const a = aesh(d.aid); if (!a) return false; a.statut = d.motif; a.absenceDebut = d.debut || aujourdhui(); a.absenceFin = d.fin || null; syncAbsence(a);
-    commit('aesh', `${a.nom} : absence déclarée (${d.motif}) à partir du ${frDate(a.absenceDebut)}${a.absenceFin ? ' jusqu\'au ' + frDate(a.absenceFin) : ''}`); location.hash = '#/absences'; setTimeout(() => publierAuto(), 100);
+    const a = aesh(d.aid); if (!a) return false; let avant = '';
+    if (absente(a)) { // nouvelle absence pour une AESH déjà notée absente : on clôt l'ancienne la veille du nouveau début
+      const deb = d.debut || aujourdhui(), v = new Date(deb + 'T12:00:00'); v.setDate(v.getDate() - 1); const veille = isoLocal(v);
+      const n = archiverRemplacements(a.id), ab = absenceOuverte(a.id); if (ab) { ab.ouvert = false; ab.fin = ab.debut && veille < ab.debut ? ab.debut : veille; }
+      avant = ` (absence précédente « ${String(a.statut).toLowerCase()} » close${n ? ', remplacements archivés : ' + n : ''})`; a.statut = 'Actif'; }
+    a.statut = d.motif; a.absenceDebut = d.debut || aujourdhui(); a.absenceFin = d.fin || null; syncAbsence(a);
+    commit('aesh', `${a.nom} : absence déclarée (${d.motif}) à partir du ${frDate(a.absenceDebut)}${a.absenceFin ? ' jusqu\'au ' + frDate(a.absenceFin) : ''}${avant}`); location.hash = '#/absences'; setTimeout(() => publierAuto(), 100);
   });
 };
 window.finAbsence = aid => {
@@ -1731,7 +1738,7 @@ window.setCalLigne = (liste, i, k, v) => { S.calendrier[liste][i][k] = v; commit
 window.addCalLigne = liste => { S.calendrier[liste].push(liste === 'vacances' ? { nom: '', debut: '', fin: '' } : { nom: '', date: '' }); commit('param', `Calendrier : ligne ajoutée (${liste})`); };
 window.delCalLigne = (liste, i) => { S.calendrier[liste].splice(i, 1); commit('param', `Calendrier : ligne retirée (${liste})`); };
 window.nouvelleAnneeCalendrier = () => { if (!confirm('Vider les vacances et les jours fériés pour préparer la nouvelle année scolaire ? (les créneaux ne sont pas touchés)')) return; const an = prompt('Nouvelle année scolaire (ex. 2027-2028) :', ''); if (an === null) return; S.calendrier = { annee: an || '', refLundi: '', refQ: 'Q1', vacances: [], feries: [] }; commit('param', 'Calendrier : nouvelle année préparée'); };
-window.cockpitSync = { cle: KEY, appliquer: d => { S = migrate(d); localStorage.setItem(KEY, JSON.stringify(S)); render(); } }; // synchro chiffrée (js/sync.js)
+window.cockpitSync = { cle: KEY, appliquer: d => { S = migrate(d); localStorage.setItem(KEY, JSON.stringify(S)); verifierRetours(); render(); } }; // retours d'absence aussi vérifiés après réception // synchro chiffrée (js/sync.js)
 window.exportJSON = () => dl(`cockpit-pas_${S.annee}_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S, null, 1));
 window.importJSON = file => { if (!file) return; const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); if (!d.eleves || !d.aesh) throw 0; S = migrate(d); log('import', `JSON importé : ${file.name}`); save(); render(); toast('Import réussi'); } catch { alert('Fichier JSON invalide.'); } }; r.readAsText(file); };
 const csvLine = arr => arr.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(';');
