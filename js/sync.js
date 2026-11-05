@@ -10,7 +10,7 @@ const APP = () => window.cockpitSync; // fourni par app.js : { cle, appliquer(d)
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
 const L = { cle: 'cockpit-sync-cle', sel: 'cockpit-sync-sel', vu: 'cockpit-sync-vu', copie: 'cockpit-pas-v1-copie-avant-synchro' };
 const ITER = 600000;
-const VERSION = '2026-11-05b'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
+const VERSION = '2026-11-05c'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
 let distant = null; // { appareil, savedAt } du dernier bloc vu en ligne
 const get = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const put = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
