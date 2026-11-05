@@ -328,8 +328,15 @@ function migrate(s) {
   s.regles = Object.assign({ jours: true, horaires: true, niveaux: true }, s.regles || {}); delete s.regles.trou; delete s.regles.midi; // le comptage des trous a été supprimé
   return s;
 }
-function save() { S._savedAt = new Date().toISOString(); localStorage.setItem(KEY, JSON.stringify(S)); const f = document.getElementById('savestate'); if (f) f.textContent = 'Enregistré ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
+function save() { S._savedAt = new Date().toISOString(); const txt = JSON.stringify(S);
+  try { localStorage.setItem(KEY, txt); }
+  catch (err) { // mémoire du navigateur pleine : on allège le journal puis on réessaie ; sinon on le dit clairement
+    if (S.journal && S.journal.length > 200) { S.journal.length = 200; try { localStorage.setItem(KEY, JSON.stringify(S)); toast('Journal raccourci pour libérer de la place'); } catch (e2) { return erreurEnregistrement(e2); } }
+    else return erreurEnregistrement(err); }
+  const f = document.getElementById('savestate'); if (f) f.textContent = 'Enregistré ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function log(type, texte) { S.journal.unshift({ date: new Date().toISOString(), type, texte }); if (S.journal.length > 2000) S.journal.length = 2000; }
+function erreurEnregistrement(err) { console.error(err); const f = document.getElementById('savestate'); if (f) f.textContent = '⚠ Non enregistré';
+  alert("Attention : la modification est affichée mais n'a pas pu être enregistrée sur cet appareil (" + (err && (err.name || err.message) || err) + ").\nFais « Données & exports › Exporter JSON » pour ne rien perdre, puis préviens Claude."); }
 function commit(type, texte) { if (texte) log(type, texte); save(); render(); }
 window.printEdt = id => {
   const a = aesh(id); if (!a) return;
@@ -372,8 +379,8 @@ const num = v => { // accepte 2.25, 2,25, 2h15, 2:15 ; texte illisible → NaN
 /* Champs d'heures : saisie libre (virgule ou point), boutons − / + et flèches du clavier par pas de 0,25 h (15 min) */
 const PAS_H = 0.25;
 const hTxt = v => v == null || v === '' ? '' : String(v).replace('.', ',');
-const champH = (attrs, v) => `<span class="h-champ"><button type="button" class="h-pas" tabindex="-1" onmousedown="event.preventDefault()" onclick="pasH(this,-1)" title="Diminuer de 15 min" aria-label="Diminuer de 15 min">−</button><input type="text" inputmode="decimal" autocomplete="off" class="h-input" ${attrs} value="${hTxt(v)}"><button type="button" class="h-pas" tabindex="-1" onmousedown="event.preventDefault()" onclick="pasH(this,1)" title="Augmenter de 15 min" aria-label="Augmenter de 15 min">+</button></span>`;
-window.pasH = (el, sens, clavier) => { const i = el.parentNode.querySelector('input'); const v = num(i.value); const n = Math.max(0, Math.round(((Number.isFinite(v) ? v : 0) + sens * PAS_H) / PAS_H) * PAS_H); i.value = hTxt(n);
+const champH = (attrs, v) => `<span class="h-champ"><input type="text" inputmode="decimal" autocomplete="off" class="h-input" ${attrs} value="${hTxt(v)}"><button type="button" class="h-pas h-moins" tabindex="-1" onmousedown="event.preventDefault()" onclick="pasH(this,-1)" title="Diminuer de 15 min" aria-label="Diminuer de 15 min">−</button><button type="button" class="h-pas" tabindex="-1" onmousedown="event.preventDefault()" onclick="pasH(this,1)" title="Augmenter de 15 min" aria-label="Augmenter de 15 min">+</button></span>`;
+window.pasH = (el, sens, clavier) => { const i = el.parentNode.querySelector('input'); const v = num(i.value); const n = Math.max(i.dataset.neg ? -999 : 0, Math.round(((Number.isFinite(v) ? v : 0) + sens * PAS_H) / PAS_H) * PAS_H); i.value = hTxt(n);
   if (clavier) i.dataset.modif = '1'; else i.dispatchEvent(new Event('change', { bubbles: true })); };
 document.addEventListener('keydown', ev => { const i = ev.target; if (!i.classList || !i.classList.contains('h-input') || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return; ev.preventDefault(); pasH(i, ev.key === 'ArrowUp' ? 1 : -1, true); });
 document.addEventListener('focusout', ev => { const i = ev.target; if (i.dataset && i.dataset.modif) { delete i.dataset.modif; i.dispatchEvent(new Event('change', { bubbles: true })); } });
@@ -1149,8 +1156,10 @@ window.editCreneau = (id, presets = {}) => {
     <h3 style="margin:14px 0 4px">AESH disponibles pour ce créneau</h3><p class="small muted" style="margin:0 0 6px"><b>Comment lire :</b> vert = convient, orange = possible avec une réserve, rouge = indisponible. Un clic sélectionne l'AESH ; rien n'est jamais bloqué.</p><div id="propositions" class="props"></div>`,
     (d) => {
       const jour = +d.jour, deb = t2m(d.debut), fin = t2m(d.fin);
-      if (fin <= deb) return alert('L\'heure de fin doit être après le début.');
-      if (conflit(d.aeshId, d.eleveId, jour, deb, fin, id, d.groupe) && !confirm('Conflit : l\'AESH ou l\'élève a déjà un créneau à ce moment. Enregistrer quand même ?')) return;
+      if (!d.eleveId || !d.aeshId) { alert('Choisis un élève et une AESH.'); return false; }
+      if (!d.debut || !d.fin) { alert('Indique l\'heure de début et l\'heure de fin.'); return false; }
+      if (fin <= deb) { alert('L\'heure de fin doit être après le début.'); return false; }
+      if (conflit(d.aeshId, d.eleveId, jour, deb, fin, id, d.groupe) && !confirm('Conflit : l\'AESH ou l\'élève a déjà un créneau à ce moment. Enregistrer quand même ?')) return false;
       if (id) { Object.assign(c, { eleveId: d.eleveId, aeshId: d.aeshId, jour, debut: d.debut, fin: d.fin }); if (d.groupe) c.groupe = d.groupe; else delete c.groupe; } else S.creneaux.push({ id: uid('k'), eleveId: d.eleveId, aeshId: d.aeshId, jour, debut: d.debut, fin: d.fin, ...(d.groupe ? { groupe: d.groupe } : {}) });
       commit('planning', `Créneau ${id ? 'modifié' : 'ajouté'} : ${eleve(d.eleveId).nom} · ${aesh(d.aeshId).nom} · ${JOURS[jour - 1]} ${d.debut}-${d.fin}`);
     }, id ? () => { S.creneaux = S.creneaux.filter(x => x.id !== id); commit('planning', 'Créneau supprimé'); } : null);
@@ -1177,7 +1186,7 @@ window.editClasse = id => {
     <label class="f">Niveau<select name="niveau">${NIVEAUX.map(s => `<option ${c.niveau === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
     <label class="f">Effectif<input type="number" name="effectif" value="${c.effectif ?? ''}"></label>
     <label class="f wide">Professeur principal<input type="text" name="pp" value="${esc(c.pp)}"></label></div>`,
-    d => { if (!d.nom.trim()) return alert('Nom obligatoire'); const old = c.nom; Object.assign(c, { nom: d.nom.trim(), site: d.site, niveau: d.niveau, effectif: num(d.effectif), pp: d.pp });
+    d => { if (!d.nom.trim()) { alert('Nom obligatoire'); return false; } const old = c.nom; Object.assign(c, { nom: d.nom.trim(), site: d.site, niveau: d.niveau, effectif: num(d.effectif), pp: d.pp });
       if (!id) S.classes.push({ id: uid('c'), ...c }); else if (old !== c.nom) S.eleves.forEach(e => { if (e.classe === old) e.classe = c.nom; });
       commit('classe', `Classe ${id ? 'modifiée' : 'créée'} : ${c.nom}`); },
     id ? () => { if (elevesDe(c).length && !confirm('Des élèves sont rattachés à cette classe. Supprimer quand même ?')) return; S.classes = S.classes.filter(x => x.id !== id); commit('classe', `Classe supprimée : ${c.nom}`); } : null);
@@ -1566,7 +1575,7 @@ function carteHeuresSup(a) {
   const kp = (v, l, k = '') => `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
   return `<div class="card" style="margin-top:14px"><h2>Heures supplémentaires <span class="small muted">compteur : heures mises de côté, à récupérer plus tard</span></h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
-      <label class="f">Dépassement de quotité autorisé (h par semaine)<input type="number" step="0.25" min="0" value="${h.autorise || ''}" placeholder="0" onchange="setHsConf('${id}','autorise',this.value)"></label>
+      <label class="f">Dépassement de quotité autorisé (h par semaine)${champH(`placeholder="0" onchange="setHsConf('${id}','autorise',this.value)"`, h.autorise || '')}</label>
       <label class="f">Compté à partir du lundi<input type="date" value="${h.depuis || ''}" onchange="setHsConf('${id}','depuis',this.value)"></label></div>
     <div class="kpis" style="grid-template-columns:repeat(4,1fr);margin-top:10px">${kp(hf(c.auto), `cumulées${c.sem ? ' · ' + c.sem + ' sem. × ' + hf(h.autorise) : ''}${c.remp ? ' · dont ' + hf(c.remp) + ' de remplacements' : ''}`)}${kp((c.ajust >= 0 ? '+' : '−') + hf(Math.abs(c.ajust)), 'ajustements')}${kp('−' + hf(c.recup), 'récupérées')}${kp(hf(c.solde), 'à récupérer', c.solde > 0 ? 'warn' : '')}</div>
     <div class="toolbar no-print" style="margin:10px 0 6px"><button class="btn sm" onclick="ajouterHS('${id}','recup')">+ Heures récupérées</button><button class="btn sm" onclick="ajouterHS('${id}','ajust')">+ Ajustement (+/−)</button></div>
@@ -1578,9 +1587,9 @@ window.ajouterHS = (id, type) => {
   const a = aesh(id), recup = type === 'recup';
   modal(`<h2>${recup ? 'Heures récupérées' : 'Ajustement du compteur'} — ${esc(a.nom)}</h2><div class="form-grid">
     <label class="f">Date<input type="date" name="date" value="${aujourdhui()}" required></label>
-    <label class="f">${recup ? 'Heures récupérées' : 'Heures (+ ou −)'}<input type="number" step="0.25" name="heures" required></label>
+    <label class="f">${recup ? 'Heures récupérées' : 'Heures (+ ou −)'}${champH(`name="heures"${recup ? '' : ' data-neg="1" placeholder="ex. 1,5 ou -1,5"'}`, '')}</label>
     <label class="f wide">Note<input type="text" name="note" placeholder="${recup ? 'ex. matinée du mercredi récupérée' : 'ex. semaine sans heure en plus'}"></label></div>`,
-    d => { const hrs = num(d.heures); if (hrs == null || hrs === 0 || (recup && hrs < 0)) return alert('Indique un nombre d\'heures' + (recup ? ' positif.' : ' (positif ou négatif).')); a.hs = a.hs || { autorise: 0, depuis: '', mouvements: [] }; a.hs.mouvements.push({ id: uid('hs'), date: d.date, type, heures: hrs, note: (d.note || '').trim() }); commit('aesh', `${a.nom} : heures supplémentaires — ${recup ? 'récupération de ' : 'ajustement de '}${hrs} h`); });
+    d => { const hrs = num(d.heures); if (hrs == null || Number.isNaN(hrs) || hrs === 0 || (recup && hrs < 0)) { alert('Indique un nombre d\'heures' + (recup ? ' positif' : ' (positif ou négatif)') + ', par exemple 1,5.'); return false; } a.hs = a.hs || { autorise: 0, depuis: '', mouvements: [] }; a.hs.mouvements.push({ id: uid('hs'), date: d.date, type, heures: hrs, note: (d.note || '').trim() }); commit('aesh', `${a.nom} : heures supplémentaires — ${recup ? 'récupération de ' : 'ajustement de '}${hrs} h`); });
 };
 window.supprimerHS = (id, mid) => { const a = aesh(id); if (!confirm('Supprimer ce mouvement du compteur ?')) return; a.hs.mouvements = a.hs.mouvements.filter(m => m.id !== mid); commit('aesh', `${a.nom} : mouvement d'heures supplémentaires supprimé`); };
 function carteSouhaits(a) {
@@ -1985,7 +1994,9 @@ function modal(html, onSave, onDelete) {
   const m = $('#modal');
   m.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog"><form id="mform" onsubmit="return false">${html}<div class="acts">${onDelete ? '<button type="button" class="btn danger" id="m-del" style="margin-right:auto">Supprimer</button>' : ''}<button type="button" class="btn" onclick="closeModal()">Annuler</button><button type="submit" class="btn primary" id="m-ok">Enregistrer</button></div></form></div></div>`;
   const form = $('#mform');
-  $('#m-ok').onclick = ev => { ev.preventDefault(); const d = {}; new FormData(form).forEach((v, k) => d[k] = v); const r = onSave(d); if (r !== false) closeModal(); };
+  $('#m-ok').onclick = ev => { ev.preventDefault(); const d = {}; new FormData(form).forEach((v, k) => d[k] = v); let r;
+    try { r = onSave(d); } catch (err) { console.error(err); closeModal(); try { render(); } catch (e2) { } alert("Un problème est survenu pendant l'enregistrement : " + (err && err.message || err) + "\nVérifie la fiche ; si la modification n'apparaît pas, envoie ce message à Claude."); return; }
+    if (r !== false) closeModal(); };
   form.onsubmit = e => { e.preventDefault(); $('#m-ok').click(); };
   if (onDelete) $('#m-del').onclick = () => { onDelete(); closeModal(); };
   const first = form.querySelector('input,select'); if (first) first.focus();

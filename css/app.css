@@ -315,3 +315,4 @@ table.t tr.row.pole-gris:hover > td { background: rgba(110, 122, 145, .16); }
 .h-champ input.h-input{flex:1;min-width:0;text-align:right;padding:7px 9px;border:1px solid var(--line2);border-radius:7px;background:#fff}
 .h-pas{flex:0 0 30px;border:1px solid var(--line2);border-radius:7px;background:#f6f7f9;font:inherit;font-size:15px;font-weight:600;line-height:1;cursor:pointer;color:inherit;padding:0}
 .h-pas:hover{background:#eceff4}
+.h-moins{order:-1} /* le champ vient en premier : un clic sur le libellé met le curseur dans le champ */
