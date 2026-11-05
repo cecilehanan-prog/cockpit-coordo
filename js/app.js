@@ -465,11 +465,19 @@ function stats(list) {
     cible, couv, reste: cible - couv, prev: act.reduce((s, e) => s + (e.heuresPrev || 0), 0),
     nonCouv: act.filter(e => couverture(e).l === 'Non couvert').length, partiel: act.filter(e => couverture(e).l === 'Partiel').length, adef: act.filter(e => couverture(e).l === 'À définir').length };
 }
+// Volume annuel : toutes les AESH sauf celles en arrêt de longue durée (case cochée dans leur fiche) ; une absence ponctuelle (grève, arrêt court) ne change pas la synthèse
 function ressource(site) {
-  const list = S.aesh.filter(a => (!site || a.site === site) && !absente(a));
+  const list = S.aesh.filter(a => (!site || a.site === site) && !a.longueDuree);
   const vol = list.reduce((s, a) => s + (a.quotite || 0), 0);
   const aff = list.reduce((s, a) => s + charge(a).tot, 0);
   return { n: list.length, vol, aff, reste: vol - aff, manq: list.filter(a => a.quotite == null).length, dep: list.filter(a => charge(a).l === 'Dépassement').length };
+}
+// Heures à couvrir sur l'année : élèves suivis (individuels + mutualisés, SEGPA compris) hors élèves ULIS,
+// plus les heures collectives ULIS (heures collectives des AESH du dispositif ULIS), comptées couvertes par ces AESH
+function couvertureAnnuelle() {
+  const st = stats(S.eleves.filter(e => dispositifDe(e) !== 'ULIS'));
+  const ulis = S.aesh.filter(a => a.dispositif === 'ULIS' && !a.longueDuree).reduce((t, a) => t + (a.heuresAutres || 0), 0);
+  return { cible: st.cible + ulis, couv: st.couv + ulis, reste: st.cible - st.couv, ulis };
 }
 /* ====================== MOTEUR PLANNING : conflits, doublons ====================== */
 const SLOTS = ['08:10', '09:05', '10:15', '11:10', '12:05', '13:00', '13:55', '14:50', '16:00', '16:55']; // créneaux Pronote ; 12:05 et 13:00 = repas
@@ -1058,7 +1066,7 @@ function setTitle(t, actions = '') { $('#title').textContent = t; $('#topactions
 function pageSynthese() {
   setTitle('Synthèse');
   const g = stats(S.eleves), r = ressource();
-  const hs = stats(S.eleves.filter(e => !['SEGPA', 'ULIS'].includes(dispositifDe(e)))); // heures à couvrir / couvertes : sans les élèves SEGPA ni ULIS du collège (leurs heures sont portées par les AESH du dispositif, comptées en collectif)
+  const hs = couvertureAnnuelle();
   const al = alertes();
   const kpi = (v, l, k = '', href = '') => href ? `<a href="${href}" class="kpi ${k}" style="text-decoration:none;color:inherit;cursor:pointer"><div class="v">${v}</div><div class="l">${l}</div></a>` : `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
   const classes = S.classes.slice().sort(cmpClasse).map(c => { const s = stats(elevesDe(c)); return { l: c.nom, h: '#/classes', segs: [{ v: s.couv, c: 'var(--ok)', t: 'couvert' }, { v: Math.max(0, s.reste), c: 'var(--bad)', t: 'reste' }, { v: s.prev, c: 'var(--warn)', t: 'prévisionnel' }], right: `${s.n} élève${s.n > 1 ? 's' : ''}` }; }).filter(x => x.right !== '0 élèves');
@@ -1068,7 +1076,7 @@ function pageSynthese() {
   $('#page').innerHTML = `<div class="print-title">Synthèse PAS — ${esc(S.annee)}</div>
   <div class="kpis">
     ${kpi(g.n, 'élèves suivis', '', "javascript:gotoElevesType('')")}${kpi(g.ind, 'individuels', 'indiv', "javascript:gotoElevesType('Individuel')")}${kpi(g.mut, 'mutualisés', 'mutu', "javascript:gotoElevesType('Mutualisé')")}
-    ${kpi(hf(S.aesh.filter(x => !absente(x) && x.quotite != null).reduce((t, x) => t + x.quotite, 0)), "volume horaire total disponible AESH / semaine", 'indiv')}${kpi(hf(hs.cible), "volume horaire total à couvrir / semaine (hors élèves SEGPA et ULIS)")}${kpi(hf(hs.couv), 'volume d\'heures couvertes (hors élèves SEGPA et ULIS)', hs.reste > 0 ? 'warn' : 'ok')}
+    ${kpi(hf(r.vol), "volume horaire total disponible AESH / semaine (toutes les AESH, hors arrêts longue durée)", 'indiv')}${kpi(hf(hs.cible), `volume horaire total à couvrir / semaine (élèves suivis, SEGPA compris${hs.ulis ? ', + ' + hf(hs.ulis) + ' collectives ULIS' : ''})`)}${kpi(hf(hs.couv), 'volume d\'heures déjà attribuées aux AESH sur ces heures à couvrir', hs.reste > 0 ? 'warn' : 'ok')}
     ${kpi(r.manq ? '?' : hf(r.reste), r.manq ? 'volume d\'heures restant disponible (quotités manquantes)' : 'volume d\'heures restant disponible', r.manq ? 'warn' : (r.reste < 0 ? 'bad' : 'ok'))}
   </div>
   <div class="grid g4" style="margin-bottom:14px">
@@ -1440,6 +1448,7 @@ window.editAesh = id => {
       <label class="f">au<input type="date" name="absenceFin" value="${a.absenceFin || ''}"></label>
       <div class="small muted" style="grid-column:1/-1">Retour automatique : l'AESH repasse « Actif » le lendemain de la date de fin.</div>
     </div>
+    <label class="f wide" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="longueDuree" ${a.longueDuree ? 'checked' : ''} style="width:auto"> Arrêt de longue durée : ne pas compter sa quotité dans la synthèse annuelle</label>
     <label class="f">Heures collectives (h) <span class="small muted">hors élève individuel — ex. ULIS, SEGPA</span>${champH('name="heuresAutres"', a.heuresAutres)}</label>
     <label class="f">Dispositif <span class="small muted">seules les AESH ULIS suivent les élèves ULIS du collège, seules les AESH SEGPA les élèves SEGPA</span><select name="dispositif"><option value="">Aucun (élèves en ordinaire)</option>${DISPOSITIFS.map(x => `<option ${a.dispositif === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
     <label class="f">E-mail<input type="email" name="email" value="${esc(a.email)}"></label>
@@ -1451,7 +1460,7 @@ window.editAesh = id => {
       <span style="width:170px;display:inline-block">${champH('id="attach-eleve-heures" placeholder="heures / semaine"', null)}</span>
       <button type="button" class="btn sm" onclick="attacherEleve('${id}')">+ Rattacher</button></div>`; })() : ''}`,
     d => { if (!d.nom.trim()) { alert('Nom obligatoire'); return false; } if (Number.isNaN(num(d.quotite)) || Number.isNaN(num(d.heuresAutres))) { alert(H_ILLISIBLE); return false; } const nomParts = d.nom.trim().split(' '); const nomFmt = nomParts.length > 1 ? nomParts[0] + ' ' + nomParts.slice(1).join(' ').toUpperCase() : nomParts[0];
-      const obj = { nom: nomFmt, site: d.site, quotite: num(d.quotite), statut: d.statut, absenceDebut: d.statut !== 'Actif' ? (d.absenceDebut || null) : null, absenceFin: d.statut !== 'Actif' ? (d.absenceFin || null) : null, heuresAutres: num(d.heuresAutres), dispositif: d.dispositif || '', email: d.email.trim(), couleur: d.couleur, remarques: d.remarques };
+      const obj = { nom: nomFmt, site: d.site, quotite: num(d.quotite), statut: d.statut, absenceDebut: d.statut !== 'Actif' ? (d.absenceDebut || null) : null, absenceFin: d.statut !== 'Actif' ? (d.absenceFin || null) : null, heuresAutres: num(d.heuresAutres), longueDuree: !!d.longueDuree, dispositif: d.dispositif || '', email: d.email.trim(), couleur: d.couleur, remarques: d.remarques };
       if (id) { const chg = a.quotite !== obj.quotite ? ` (quotité ${a.quotite ?? '—'} → ${obj.quotite ?? '—'})` : ''; const dchg = a.dispositif !== obj.dispositif ? ` (dispositif ${a.dispositif || 'aucun'} → ${obj.dispositif || 'aucun'})` : ''; const avantAbs = !!absenceOuverte(a.id); Object.assign(a, obj); syncAbsence(a); if (avantAbs !== !!absenceOuverte(a.id)) setTimeout(() => publierAuto(), 300); const nb = synchroDispositifs(); commit('aesh', `${a.nom} modifié${chg}${dchg}${nb ? ' — élèves ULIS / SEGPA rattachés automatiquement' : ''}`); }
       else { const n = { id: uid('a'), ...obj }; S.aesh.push(n); const nb = synchroDispositifs(); commit('aesh', `AESH ajouté : ${n.nom}${nb ? ' — élèves ULIS / SEGPA rattachés automatiquement' : ''}`); location.hash = '#/aesh/' + n.id; } },
     id ? () => { if (!confirm(`Supprimer ${a.nom} et toutes ses affectations ?`)) return; S.creneaux = S.creneaux.filter(x => x.aeshId !== id); S.aesh = S.aesh.filter(x => x.id !== id); synchroDispositifs(); S.affectations = S.affectations.filter(x => x.aeshId !== id); commit('aesh', `AESH supprimé : ${a.nom}`); location.hash = '#/aesh'; } : null);
@@ -1770,8 +1779,8 @@ window.exportWordAesh = id => { const a = aesh(id); const c = charge(a);
   <h2>Élèves suivis</h2><table><tr><th>Élève</th><th>Classe</th><th>Type</th><th>Heures</th></tr>${affOfAesh(a).map(x => { const e = eleve(x.eleveId); return `<tr><td>${esc(e.nom)} ${esc(e.prenom)}</td><td>${esc(e.classe)}</td><td>${e.type}</td><td>${hf(x.heures)}</td></tr>`; }).join('')}</table>
   <h2>Emploi du temps</h2><table><tr><th>Jour</th><th>Horaire</th><th>Élève</th></tr>${S.creneaux.filter(x => x.aeshId === id).sort((p, q) => p.jour - q.jour || t2m(p.debut) - t2m(q.debut)).map(x => `<tr><td>${JOURS[x.jour - 1]}</td><td>${x.debut}–${x.fin}</td><td>${esc(eleve(x.eleveId)?.nom)} ${esc(eleve(x.eleveId)?.prenom)} (${esc(eleve(x.eleveId)?.classe)})</td></tr>`).join('') || '<tr><td colspan="3">Aucun</td></tr>'}</table>`); };
 window.exportWordSynthese = () => { const rows = SITES.map(s => { const st = stats(S.eleves.filter(e => e.site === s)), rs = ressource(s); return `<tr><td>${s}</td><td>${st.n}</td><td>${st.ind}</td><td>${st.mut}</td><td>${st.pending}</td><td>${hf(st.cible)}</td><td>${hf(st.couv)}</td><td>${hf(st.reste)}</td><td>${rs.n}</td><td>${hf(rs.vol)}</td><td>${hf(rs.reste)}</td></tr>`; }).join('');
-  const g = stats(S.eleves), r = ressource();
-  wordDoc('Synthèse PAS', `<table><tr><th>Élèves suivis</th><td>${g.n}</td><th>Nombre d'heures à couvrir</th><td>${hf(g.cible)}</td></tr><tr><th>Individuels / mutualisés</th><td>${g.ind} / ${g.mut}</td><th>Heures couvertes</th><td>${hf(g.couv)}</td></tr><tr><th>Dossiers en cours</th><td>${g.pending}</td><th>Volume AESH / reste</th><td>${hf(r.vol)} / ${r.manq ? '?' : hf(r.reste)}</td></tr></table>
+  const g = stats(S.eleves), r = ressource(), hs = couvertureAnnuelle();
+  wordDoc('Synthèse PAS', `<table><tr><th>Élèves suivis</th><td>${g.n}</td><th>Nombre d'heures à couvrir</th><td>${hf(hs.cible)}</td></tr><tr><th>Individuels / mutualisés</th><td>${g.ind} / ${g.mut}</td><th>Heures couvertes</th><td>${hf(hs.couv)}</td></tr><tr><th>Dossiers en cours</th><td>${g.pending}</td><th>Volume AESH / reste</th><td>${hf(r.vol)} / ${r.manq ? '?' : hf(r.reste)}</td></tr></table>
   <h2>Par site</h2><table><tr><th>Site</th><th>Suivis</th><th>Indiv.</th><th>Mutu.</th><th>Dossiers</th><th>Cibles</th><th>Couvertes</th><th>Reste</th><th>AESH</th><th>Volume</th><th>Dispo</th></tr>${rows}</table>
   <h2>Alertes</h2><ul>${alertes().map(a => `<li>${esc(a.t)}</li>`).join('') || '<li>Aucune</li>'}</ul>`); };
 
