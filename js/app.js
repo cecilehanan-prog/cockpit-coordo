@@ -363,7 +363,21 @@ const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const hf = n => (n == null || n === '') ? '—' : n.toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + ' h';
 const pct = (a, b) => b ? Math.round(100 * a / b) : 0;
-const num = v => (v === '' || v == null) ? null : Number(v);
+const num = v => { // accepte 2.25, 2,25, 2h15, 2:15 ; texte illisible → NaN
+  if (v === '' || v == null) return null; if (typeof v === 'number') return v;
+  const s = String(v).trim().replace(/\s+/g, ''); if (!s) return null;
+  const m = s.match(/^(\d+)[hH:](\d{0,2})$/); if (m) return Number(m[1]) + (m[2] ? Number(m[2]) / 60 : 0);
+  return Number(s.replace(',', '.'));
+};
+/* Champs d'heures : saisie libre (virgule ou point), boutons − / + et flèches du clavier par pas de 0,25 h (15 min) */
+const PAS_H = 0.25;
+const hTxt = v => v == null || v === '' ? '' : String(v).replace('.', ',');
+const champH = (attrs, v) => `<span class="h-champ"><button type="button" class="h-pas" tabindex="-1" onmousedown="event.preventDefault()" onclick="pasH(this,-1)" title="Diminuer de 15 min" aria-label="Diminuer de 15 min">−</button><input type="text" inputmode="decimal" autocomplete="off" class="h-input" ${attrs} value="${hTxt(v)}"><button type="button" class="h-pas" tabindex="-1" onmousedown="event.preventDefault()" onclick="pasH(this,1)" title="Augmenter de 15 min" aria-label="Augmenter de 15 min">+</button></span>`;
+window.pasH = (el, sens, clavier) => { const i = el.parentNode.querySelector('input'); const v = num(i.value); const n = Math.max(0, Math.round(((Number.isFinite(v) ? v : 0) + sens * PAS_H) / PAS_H) * PAS_H); i.value = hTxt(n);
+  if (clavier) i.dataset.modif = '1'; else i.dispatchEvent(new Event('change', { bubbles: true })); };
+document.addEventListener('keydown', ev => { const i = ev.target; if (!i.classList || !i.classList.contains('h-input') || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return; ev.preventDefault(); pasH(i, ev.key === 'ArrowUp' ? 1 : -1, true); });
+document.addEventListener('focusout', ev => { const i = ev.target; if (i.dataset && i.dataset.modif) { delete i.dataset.modif; i.dispatchEvent(new Event('change', { bubbles: true })); } });
+const H_ILLISIBLE = "Nombre d'heures non reconnu. Écris par exemple 2,25 (ou 2h15) pour 2 h 15 min.";
 const byId = (arr, id) => arr.find(x => x.id === id);
 const eleve = id => byId(S.eleves, id);
 const aesh = id => byId(S.aesh, id);
@@ -1218,8 +1232,8 @@ function eleveForm(e) {
     <label class="f">Type d'accompagnement<select name="type">${opt(['Individuel', 'Mutualisé'], e.type)}</select></label>
     <label class="f">Dispositif <span class="small muted">un élève ULIS ou SEGPA n'est suivi que par les AESH de ce dispositif</span><select name="dispositif"><option value="">Aucun (en ordinaire)</option>${DISPOSITIFS.map(x => `<option ${dispositifDe(e) === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
     <label class="f">Statut du dossier<select name="statut">${opt(STATUTS, e.statut)}</select></label>
-    <label class="f">Nombre d'heures à couvrir<input type="number" step="0.5" name="heures" value="${e.heures ?? ''}"></label>
-    <label class="f">Heures prévisionnelles (si dossier accepté)<input type="number" step="0.5" name="heuresPrev" value="${e.heuresPrev ?? ''}"></label>
+    <label class="f">Nombre d'heures à couvrir${champH('name="heures"', e.heures)}</label>
+    <label class="f">Heures prévisionnelles (si dossier accepté)${champH('name="heuresPrev"', e.heuresPrev)}</label>
     <label class="f">N° dossier MDPH<input type="text" name="numDossier" value="${esc(e.numDossier)}"></label>
     <label class="f">Début notification<input type="date" name="notifDebut" value="${e.notifDebut || ''}"></label>
     <label class="f">Fin notification<input type="date" name="notifFin" value="${e.notifFin || ''}"></label>
@@ -1234,7 +1248,8 @@ function eleveForm(e) {
 window.editEleve = (id, presets = {}) => {
   const e = id ? eleve(id) : { nom: '', prenom: '', classe: '', site: 'Collège', niveau: '6e', type: 'Mutualisé', statut: 'Notifié', heures: null, heuresPrev: null, gevasco: '', adresse: '', responsables: '', tel: '', email: '', pp: '', notifDebut: '', notifFin: '', numDossier: '', remarques: '', archive: false, ...presets };
   modal(`<h2>${id ? 'Modifier ' + esc(e.prenom) + ' ' + esc(e.nom) : 'Nouvel élève'}</h2>${eleveForm(e)}`, d => {
-    if (!d.nom.trim()) return alert('Nom obligatoire');
+    if (!d.nom.trim()) { alert('Nom obligatoire'); return false; }
+    if (Number.isNaN(num(d.heures)) || Number.isNaN(num(d.heuresPrev))) { alert(H_ILLISIBLE); return false; }
     const obj = { ...e, ...d, nom: d.nom.trim().toUpperCase(), heures: num(d.heures), heuresPrev: num(d.heuresPrev) };
     if (obj.classe && !S.classes.some(c => c.nom === obj.classe)) S.classes.push({ id: uid('c'), site: obj.site, niveau: obj.niveau, nom: obj.classe, effectif: null, pp: '' });
     if (id) { CHAMPS_DOSSIER.forEach(c => { if (obj[c] !== undefined && String(e[c] ?? '') !== String(obj[c] ?? '')) { (e.manuel = e.manuel || {})[c] = true; if (e.auto) delete e.auto[c]; } }); if (obj.statut !== e.statut) e.statutManuel = true;
@@ -1286,7 +1301,7 @@ function ficheEleve(id) {
    <div class="card"><h2>Identité <span class="small muted" style="font-weight:400">cliquer sur une valeur pour la modifier</span></h2><dl class="dl">${ed('Adresse', 'adresse')}${ed('Responsables', 'responsables')}${ed('Téléphone', 'tel')}${ed('E-mail', 'email')}${ed('N° dossier MDPH', 'numDossier')}${ed('Enseignant référent', 'enseignantReferent')}${ed('Professeur principal', 'pp')}${ed('Classe', 'classe')}</dl></div>
    <div class="card"><h2>Notification</h2><dl class="dl">${ed('Type', 'type', 'select', ['Individuel', 'Mutualisé'])}${ed('Statut', 'statut', 'select', STATUTS)}${statutNote(e)}${/déposé/.test(e.statut || '') ? ed('Dossier déposé le', 'depotDate', 'date') : ''}${ed("Nombre d'heures à couvrir", 'heures', 'number')}${ed('Prévisionnel', 'heuresPrev', 'number')}${ed('Début notification', 'notifDebut', 'date')}${ed('Fin notification', 'notifFin', 'date')}${pastilleValidite(e) ? '<dt>Validité</dt><dd>' + pastilleValidite(e) + '</dd>' : ''}${ed('GEVASCO (validité)', 'gevasco', 'date')}${ed('Dernière réunion GEVASCO', 'gevascoDate', 'date')}${ed('ESS : date', 'essDate', 'date')}${ed('ESS : heure', 'essHeure', 'time')}${ed('ESS : salle', 'essSalle')}${e.essNote && !e.essDate ? ed('ESS : situation', 'essNote') : ''}</dl>
     <div style="margin-top:10px"><div class="gauge"><i class="${c.k === 'ok' ? '' : c.k}" style="width:${e.heures ? Math.min(100, pct(couvertes(e), e.heures)) : (couvertes(e) ? 100 : 0)}%"></i></div><div class="small muted" style="margin-top:3px">${hf(couvertes(e))} affectées${e.heures ? ' sur ' + hf(e.heures) : ''}</div></div></div>
-   <div class="card"><h2>AESH affectés</h2><div class="aff-list" id="afflist">${affs.map(a => { const x = aesh(a.aeshId); return x ? `<div class="aff-item"><span style="white-space:nowrap"><span class="dot" style="background:${couleurAesh(x)}"></span><a href="#/aesh/${x.id}">${esc(x.nom)}</a>${a.aConfirmer ? ` <button type="button" class="pill warn" style="border:0;cursor:pointer;font:inherit;font-weight:600" title="Cliquer pour confirmer cette répartition" onclick="confirmerAff('${e.id}','${x.id}')">à confirmer</button>` : ''}</span><input type="number" step="0.25" value="${a.heures ?? 0}" onchange="setAff('${e.id}','${x.id}',this.value)"><button class="btn sm ghost" onclick="setAff('${e.id}','${x.id}','')" title="Retirer">✕</button></div>` : ''; }).join('') || '<span class="muted small">Aucun AESH.</span>'}</div>
+   <div class="card"><h2>AESH affectés</h2><div class="aff-list" id="afflist">${affs.map(a => { const x = aesh(a.aeshId); return x ? `<div class="aff-item"><span style="white-space:nowrap"><span class="dot" style="background:${couleurAesh(x)}"></span><a href="#/aesh/${x.id}">${esc(x.nom)}</a>${a.aConfirmer ? ` <button type="button" class="pill warn" style="border:0;cursor:pointer;font:inherit;font-weight:600" title="Cliquer pour confirmer cette répartition" onclick="confirmerAff('${e.id}','${x.id}')">à confirmer</button>` : ''}</span>${champH(`onchange="setAff('${e.id}','${x.id}',this.value)"`, a.heures ?? 0)}<button class="btn sm ghost" onclick="setAff('${e.id}','${x.id}','')" title="Retirer">✕</button></div>` : ''; }).join('') || '<span class="muted small">Aucun AESH.</span>'}</div>
     <div class="toolbar no-print" style="margin:10px 0 0"><select id="addaesh" style="width:auto">${S.aesh.filter(a => !affs.some(x => x.aeshId === a.id)).map(a => `<option value="${a.id}">${esc(a.nom)} (${charge(a).reste == null ? '?' : charge(a).reste + ' h dispo'})</option>`).join('')}</select><button class="btn sm" onclick="setAff('${e.id}',document.getElementById('addaesh').value,0);">+ Ajouter</button></div>
     <h3 style="margin-top:12px">Remarques / notes</h3><dl class="dl" style="grid-template-columns:1fr"><dd class="ed" data-f="remarques" onclick="inlineEdit('${id}','remarques','textarea',[])" title="Cliquer pour modifier">${e.remarques ? esc(e.remarques).replace(/\n/g, '<br>') : '<span class="muted">— cliquer pour ajouter une note</span>'}</dd></dl></div>
   </div>
@@ -1310,11 +1325,12 @@ window.inlineEdit = (id, field, kind, opts) => {
   let ctl;
   if (kind === 'select') ctl = `<select>${opts.map(o => `<option ${cur === o ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
   else if (kind === 'textarea') ctl = `<textarea>${esc(cur)}</textarea>`;
-  else ctl = `<input type="${kind}" ${kind === 'number' ? 'step="0.25"' : ''} value="${esc(cur)}">`;
-  el.innerHTML = ctl; const c = el.firstChild; c.focus();
+  else if (kind === 'number') ctl = champH('', cur);
+  else ctl = `<input type="${kind}" value="${esc(cur)}">`;
+  el.innerHTML = ctl; const c = el.querySelector('input,select,textarea'); c.focus();
   const done = (cancel) => {
     if (cancel) return render();
-    let v = c.value; if (kind === 'number') v = num(v); if (kind === 'text' || kind === 'textarea') v = v.trim();
+    let v = c.value; if (kind === 'number') { v = num(v); if (Number.isNaN(v)) { alert(H_ILLISIBLE); return render(); } } if (kind === 'text' || kind === 'textarea') v = v.trim();
     if (String(e[field] ?? '') !== String(v ?? '')) { const old = e[field]; e[field] = v; if (CHAMPS_DOSSIER.includes(field)) { (e.manuel = e.manuel || {})[field] = true; if (e.auto) delete e.auto[field]; } if (field === 'statut') e.statutManuel = true; commit('eleve', `${e.nom} ${e.prenom} : ${field} ${old ?? '—'} → ${v ?? '—'}`); } else render();
   };
   c.onblur = () => done(false);
@@ -1324,11 +1340,11 @@ window.inlineEdit = (id, field, kind, opts) => {
 window.inlineEditAesh = (id, field, kind) => {
   const a = aesh(id); const cur = a[field] ?? '';
   const el = document.querySelector(`[data-af="${field}"]`); if (!el || el.querySelector('input,select,textarea')) return;
-  const ctl = `<input type="${kind}" ${kind === 'number' ? 'step="0.5"' : ''} value="${esc(cur)}">`;
-  el.innerHTML = ctl; const c = el.firstChild; c.focus(); c.select();
+  const ctl = kind === 'number' ? champH('', cur) : `<input type="${kind}" value="${esc(cur)}">`;
+  el.innerHTML = ctl; const c = el.querySelector('input'); c.focus(); c.select();
   const done = (cancel) => {
     if (cancel) return render();
-    let v = c.value; if (kind === 'number') v = num(v);
+    let v = c.value; if (kind === 'number') { v = num(v); if (Number.isNaN(v)) { alert(H_ILLISIBLE); return render(); } }
     if (String(a[field] ?? '') !== String(v ?? '')) { const old = a[field]; a[field] = v; commit('aesh', `${a.nom} : ${field} ${old ?? '—'} → ${v ?? '—'}`); } else render();
   };
   c.onblur = () => done(false);
@@ -1349,7 +1365,7 @@ window.setAff = (eid, aid, v) => {
   const e = eleve(eid), a = aesh(aid);
   let x = S.affectations.find(z => z.eleveId === eid && z.aeshId === aid);
   if (v === '' || v == null) { S.affectations = S.affectations.filter(z => z !== x); return commit('affectation', `${e.nom} ${e.prenom} : ${a.nom} retirée`); }
-  v = Number(v);
+  v = num(v); if (!Number.isFinite(v)) { alert(H_ILLISIBLE); return render(); }
   if (x) { const old = x.heures; x.heures = v; x.aConfirmer = false; commit('affectation', old !== v ? `${e.nom} ${e.prenom} ↔ ${a.nom} : ${old} → ${v} h` : null); }
   else { S.affectations.push({ eleveId: eid, aeshId: aid, heures: v, aConfirmer: false }); commit('affectation', `${e.nom} ${e.prenom} ↔ ${a.nom} : ${v} h`); }
 };
@@ -1399,14 +1415,14 @@ window.editAesh = id => {
   modal(`<h2>${id ? 'Modifier ' + esc(a.nom) : 'Nouvel AESH'}</h2><div class="form-grid">
     <label class="f">Prénom / Nom<input type="text" name="nom" value="${esc(a.nom)}" required></label>
     <label class="f">Site principal<select name="site">${[...SITES, 'Mixte'].map(s => `<option ${a.site === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
-    <label class="f">Quotité hebdo d'accompagnement (h)<input type="number" step="0.5" name="quotite" value="${a.quotite ?? ''}"></label>
+    <label class="f">Quotité hebdo d'accompagnement (h)${champH('name="quotite"', a.quotite)}</label>
     <label class="f">Statut<select name="statut" onchange="document.getElementById('absence-dates').style.display=this.value!=='Actif'?'':'none'">${STATUTS_AESH.map(s => `<option ${a.statut === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
     <div id="absence-dates" class="f wide" style="display:${absente(a) ? '' : 'none'};gap:10px;grid-template-columns:1fr 1fr">
       <label class="f">Absence du<input type="date" name="absenceDebut" value="${a.absenceDebut || ''}"></label>
       <label class="f">au<input type="date" name="absenceFin" value="${a.absenceFin || ''}"></label>
       <div class="small muted" style="grid-column:1/-1">Retour automatique : l'AESH repasse « Actif » le lendemain de la date de fin.</div>
     </div>
-    <label class="f">Heures collectives (h) <span class="small muted">hors élève individuel — ex. ULIS, SEGPA</span><input type="number" step="0.5" name="heuresAutres" value="${a.heuresAutres ?? ''}"></label>
+    <label class="f">Heures collectives (h) <span class="small muted">hors élève individuel — ex. ULIS, SEGPA</span>${champH('name="heuresAutres"', a.heuresAutres)}</label>
     <label class="f">Dispositif <span class="small muted">seules les AESH ULIS suivent les élèves ULIS du collège, seules les AESH SEGPA les élèves SEGPA</span><select name="dispositif"><option value="">Aucun (élèves en ordinaire)</option>${DISPOSITIFS.map(x => `<option ${a.dispositif === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
     <label class="f">E-mail<input type="email" name="email" value="${esc(a.email)}"></label>
     <label class="f">Couleur<input type="color" name="couleur" value="${a.couleur}" style="height:36px;width:100%"></label>
@@ -1414,9 +1430,9 @@ window.editAesh = id => {
     ${id ? (() => { const dispo = sortEleves(S.eleves.filter(e => isActive(e) && !S.affectations.some(x => x.eleveId === e.id && x.aeshId === id)));
       return `<h3 style="margin:16px 0 8px">Rattacher un élève</h3><div class="toolbar" style="margin:0">
       <select id="attach-eleve-select" style="width:auto">${dispo.length ? dispo.map(e => `<option value="${e.id}">${esc(e.nom)} ${esc(e.prenom)} — ${esc(e.classe)}</option>`).join('') : '<option value="">Aucun élève disponible</option>'}</select>
-      <input id="attach-eleve-heures" type="number" step="0.5" min="0" placeholder="heures / semaine" style="width:140px">
+      <span style="width:170px;display:inline-block">${champH('id="attach-eleve-heures" placeholder="heures / semaine"', null)}</span>
       <button type="button" class="btn sm" onclick="attacherEleve('${id}')">+ Rattacher</button></div>`; })() : ''}`,
-    d => { if (!d.nom.trim()) return alert('Nom obligatoire'); const nomParts = d.nom.trim().split(' '); const nomFmt = nomParts.length > 1 ? nomParts[0] + ' ' + nomParts.slice(1).join(' ').toUpperCase() : nomParts[0];
+    d => { if (!d.nom.trim()) { alert('Nom obligatoire'); return false; } if (Number.isNaN(num(d.quotite)) || Number.isNaN(num(d.heuresAutres))) { alert(H_ILLISIBLE); return false; } const nomParts = d.nom.trim().split(' '); const nomFmt = nomParts.length > 1 ? nomParts[0] + ' ' + nomParts.slice(1).join(' ').toUpperCase() : nomParts[0];
       const obj = { nom: nomFmt, site: d.site, quotite: num(d.quotite), statut: d.statut, absenceDebut: d.statut !== 'Actif' ? (d.absenceDebut || null) : null, absenceFin: d.statut !== 'Actif' ? (d.absenceFin || null) : null, heuresAutres: num(d.heuresAutres), dispositif: d.dispositif || '', email: d.email.trim(), couleur: d.couleur, remarques: d.remarques };
       if (id) { const chg = a.quotite !== obj.quotite ? ` (quotité ${a.quotite ?? '—'} → ${obj.quotite ?? '—'})` : ''; const dchg = a.dispositif !== obj.dispositif ? ` (dispositif ${a.dispositif || 'aucun'} → ${obj.dispositif || 'aucun'})` : ''; const avantAbs = !!absenceOuverte(a.id); Object.assign(a, obj); syncAbsence(a); if (avantAbs !== !!absenceOuverte(a.id)) setTimeout(() => publierAuto(), 300); const nb = synchroDispositifs(); commit('aesh', `${a.nom} modifié${chg}${dchg}${nb ? ' — élèves ULIS / SEGPA rattachés automatiquement' : ''}`); }
       else { const n = { id: uid('a'), ...obj }; S.aesh.push(n); const nb = synchroDispositifs(); commit('aesh', `AESH ajouté : ${n.nom}${nb ? ' — élèves ULIS / SEGPA rattachés automatiquement' : ''}`); location.hash = '#/aesh/' + n.id; } },
@@ -1546,7 +1562,7 @@ function compteurHS(a) {
   return { sem, remp, auto, ajust, recup, solde: auto + ajust - recup };
 }
 function carteHeuresSup(a) {
-  const id = a.id, h = a.hs, c = compteurHS(a), mv = (h.mouvements || []).slice().sort((x, y) => (y.date || '').localeCompare(x.date || ''));
+  const id = a.id, h = a.hs || { autorise: 0, depuis: '', mouvements: [] }, c = compteurHS(a), mv = (h.mouvements || []).slice().sort((x, y) => (y.date || '').localeCompare(x.date || ''));
   const kp = (v, l, k = '') => `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
   return `<div class="card" style="margin-top:14px"><h2>Heures supplémentaires <span class="small muted">compteur : heures mises de côté, à récupérer plus tard</span></h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
@@ -1969,7 +1985,7 @@ function modal(html, onSave, onDelete) {
   const m = $('#modal');
   m.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog"><form id="mform" onsubmit="return false">${html}<div class="acts">${onDelete ? '<button type="button" class="btn danger" id="m-del" style="margin-right:auto">Supprimer</button>' : ''}<button type="button" class="btn" onclick="closeModal()">Annuler</button><button type="submit" class="btn primary" id="m-ok">Enregistrer</button></div></form></div></div>`;
   const form = $('#mform');
-  $('#m-ok').onclick = () => { const d = {}; new FormData(form).forEach((v, k) => d[k] = v); const r = onSave(d); if (r !== false) closeModal(); };
+  $('#m-ok').onclick = ev => { ev.preventDefault(); const d = {}; new FormData(form).forEach((v, k) => d[k] = v); const r = onSave(d); if (r !== false) closeModal(); };
   form.onsubmit = e => { e.preventDefault(); $('#m-ok').click(); };
   if (onDelete) $('#m-del').onclick = () => { onDelete(); closeModal(); };
   const first = form.querySelector('input,select'); if (first) first.focus();
