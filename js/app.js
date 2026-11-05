@@ -474,10 +474,21 @@ function ressource(site) {
 }
 // Heures à couvrir sur l'année : élèves suivis (individuels + mutualisés, SEGPA compris) hors élèves ULIS,
 // plus les heures collectives ULIS (heures collectives des AESH du dispositif ULIS), comptées couvertes par ces AESH
+// SEGPA et ULIS sont sortis de la synthèse (onglet « SEGPA / ULIS ») : seuls les élèves en voie ordinaire sont comptés
 function couvertureAnnuelle() {
-  const st = stats(S.eleves.filter(e => dispositifDe(e) !== 'ULIS'));
-  const ulis = S.aesh.filter(a => a.dispositif === 'ULIS' && !a.longueDuree).reduce((t, a) => t + (a.heuresAutres || 0), 0);
-  return { cible: st.cible + ulis, couv: st.couv + ulis, reste: st.cible - st.couv, ulis };
+  const st = stats(S.eleves.filter(e => !dispositifDe(e)));
+  return { cible: st.cible, couv: st.couv, reste: st.cible - st.couv, n: st.n };
+}
+// Heures qu'une AESH de dispositif donne à la voie ordinaire : ULIS = quotité − heures collectives ULIS (ex. 26 − 16 = 10 h) ;
+// SEGPA = seulement les heures déjà attribuées à des élèves en voie ordinaire (aucune pour l'instant)
+const versOrdinaire = a => affOfAesh(a).filter(x => !dispositifDe(eleve(x.eleveId))).reduce((t, x) => t + (x.heures || 0), 0);
+const capaciteOrdinaire = a => a.dispositif === 'ULIS' ? Math.max(versOrdinaire(a), (a.quotite || 0) - (a.heuresAutres || 0)) : versOrdinaire(a);
+// Volume annuel pour la voie ordinaire : quotité des AESH hors dispositif (sauf longue durée) + part ordinaire des AESH ULIS / SEGPA
+function ressourceOrdinaire() {
+  const ord = S.aesh.filter(a => !a.longueDuree && !a.dispositif), disp = S.aesh.filter(a => !a.longueDuree && a.dispositif);
+  const vol = ord.reduce((t, a) => t + (a.quotite || 0), 0) + disp.reduce((t, a) => t + capaciteOrdinaire(a), 0);
+  const aff = ord.reduce((t, a) => t + charge(a).tot, 0) + disp.reduce((t, a) => t + versOrdinaire(a), 0);
+  return { n: ord.length, vol, aff, reste: vol - aff, manq: ord.filter(a => a.quotite == null).length };
 }
 /* ====================== MOTEUR PLANNING : conflits, doublons ====================== */
 const SLOTS = ['08:10', '09:05', '10:15', '11:10', '12:05', '13:00', '13:55', '14:50', '16:00', '16:55']; // créneaux Pronote ; 12:05 et 13:00 = repas
@@ -1037,10 +1048,35 @@ function carteAbsencesAesh(a) {
     ${hist.length ? `<table class="t compact" style="margin-top:8px"><thead><tr><th>Motif</th><th>Période</th><th>État</th></tr></thead><tbody>${hist.map(ab => `<tr><td>${esc(ab.motif || '')}</td><td>${ab.debut ? frDate(ab.debut) : '—'} → ${ab.fin ? frDate(ab.fin) : '—'}</td><td>${ab.ouvert ? '<span class="pill warn">en cours</span>' : '<span class="pill neutral">terminée</span>'}</td></tr>`).join('')}</tbody></table>` : '<div class="small muted" style="margin-top:6px">Aucune absence enregistrée.</div>'}</div>`;
 }
 
+/* ====================== SEGPA / ULIS ====================== */
+function pageDispositifs() {
+  setTitle('SEGPA / ULIS');
+  const notif = e => e.statut === 'Notifié';
+  const bloc = D => {
+    const A = sortAesh(S.aesh.filter(a => a.dispositif === D)), E = sortEleves(S.eleves.filter(e => isActive(e) && dispositifDe(e) === D));
+    const versE = (a, pred) => affOfAesh(a).filter(x => pred(eleve(x.eleveId))).reduce((t, x) => t + (x.heures || 0), 0);
+    const q = A.filter(a => !a.longueDuree).reduce((t, a) => t + (a.quotite || 0), 0);
+    const coll = A.filter(a => !a.longueDuree).reduce((t, a) => t + (a.heuresAutres || 0), 0);
+    const auxEl = A.filter(a => !a.longueDuree).reduce((t, a) => t + versE(a, e => dispositifDe(e) === D), 0);
+    const ord = A.filter(a => !a.longueDuree).reduce((t, a) => t + capaciteOrdinaire(a), 0);
+    const En = E.filter(notif), hn = En.reduce((t, e) => t + (e.heures || 0), 0);
+    const sansNotif = q - ord - hn, ulis = D === 'ULIS';
+    const kpi = (v, l, k = '') => `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+    return `<div class="card" style="margin-bottom:14px"><h2>${D}</h2>
+      <div class="kpis" style="margin-bottom:12px">${kpi(hf(q), 'quotité des AESH ' + D + ' / semaine', 'indiv')}${kpi(En.length + ' <span class="small">(' + En.filter(e => e.type === 'Individuel').length + ' indiv. · ' + En.filter(e => e.type === 'Mutualisé').length + ' mutu.)</span>', 'élèves notifiés')}${kpi(hf(hn), 'heures notifiées de ces élèves')}${ulis ? kpi(hf(coll), 'heures collectives ULIS') : ''}${ord ? kpi(hf(ord), 'heures pour la voie ordinaire (comptées dans la Synthèse)', 'ok') : ''}${ulis ? '' : kpi(hf(Math.max(0, sansNotif)), 'heures AESH sans élève notifié en face', sansNotif > 0 ? 'warn' : 'ok')}</div>
+      <h3 style="margin:0 0 6px">AESH</h3><div class="table-wrap"><table class="t compact"><thead><tr><th>AESH</th><th class="num">Quotité</th><th class="num">Heures collectives</th><th class="num">Heures aux élèves ${D}</th><th class="num">Heures pour la voie ordinaire</th><th>Statut</th></tr></thead><tbody>
+      ${A.map(a => `<tr class="row" onclick="location.hash='#/aesh/${a.id}'"><td><b>${esc(a.nom)}</b></td><td class="num">${hf(a.quotite)}</td><td class="num">${hf(a.heuresAutres)}</td><td class="num">${hf(versE(a, e => dispositifDe(e) === D))}</td><td class="num">${hf(capaciteOrdinaire(a))}</td><td>${a.longueDuree ? '<span class="pill neutral">arrêt longue durée (non compté)</span>' : absente(a) ? '<span class="pill warn">' + esc(a.statut) + '</span>' : '<span class="pill ok">Actif</span>'}</td></tr>`).join('') || `<tr><td colspan="6" class="muted">Aucune AESH rattachée au dispositif ${D} (champ « Dispositif » de la fiche AESH).</td></tr>`}</tbody></table></div>
+      <h3 style="margin:14px 0 6px">Élèves</h3><div class="table-wrap"><table class="t compact"><thead><tr><th>Élève</th><th>Classe</th><th>Type</th><th>Statut du dossier MDPH</th><th class="num">Heures notifiées</th><th class="num">Heures attribuées</th><th>AESH</th></tr></thead><tbody>
+      ${E.map(e => `<tr class="row" onclick="location.hash='#/eleves/${e.id}'"><td><b>${esc(e.nom)}</b> ${esc(e.prenom)}</td><td>${esc(e.classe)}</td><td><span class="pill ${e.type === 'Individuel' ? 'indiv' : 'mutu'}">${e.type}</span></td><td><span class="pill ${notif(e) ? 'ok' : isPending(e) ? 'warn' : 'neutral'}">${esc(statutTxt(e))}</span></td><td class="num">${hf(e.heures)}</td><td class="num">${hf(couvertes(e))}</td><td>${affOf(e).filter(x => x.heures > 0).map(x => esc(aesh(x.aeshId)?.nom || '') + ' (' + hf(x.heures) + ')').join(', ') || '<span class="muted">—</span>'}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Aucun élève.</td></tr>'}</tbody></table></div>
+      ${D === 'SEGPA' ? '<p class="small muted" style="margin:10px 0 0">Rappel : en SEGPA, l\'accompagnement collectif n\'est autorisé qu\'en 6e et en 3e.</p>' : ''}</div>`;
+  };
+  $('#page').innerHTML = `<p class="small muted" style="margin:0 0 12px">Ces élèves et ces AESH ne sont pas comptés dans la Synthèse (sauf les heures que les AESH du dispositif donnent à des élèves en voie ordinaire). Les AESH ULIS comptent dans la Synthèse pour leur part en voie ordinaire (quotité − heures collectives ULIS, ex. 26 − 16 = 10 h), avec leurs élèves ordinaires. « Heures sans élève notifié en face » (SEGPA) = quotité − heures notifiées des élèves SEGPA − heures pour la voie ordinaire.</p>${DISPOSITIFS.slice().reverse().map(bloc).join('')}`;
+}
+
 /* ====================== ROUTER ====================== */
 const routes = {
   questions: pageQuestions, evals: pageEvals, ess: pageEss, absences: pageAbsences, synthese: pageSynthese, planning: pagePlanning, classes: pageClasses, eleves: pageEleves, aesh: pageAesh,
-  affectation: pageAffectation, dossiers: pageDossiers, archives: pageArchives, bibliotheque: pageBibliotheque, parametres: pageParametres, reperes: pageReperes, pps: pagePPS, 'synthese-aesh': pageSyntheseAesh, alertes: pageAlertes
+  affectation: pageAffectation, dossiers: pageDossiers, archives: pageArchives, bibliotheque: pageBibliotheque, parametres: pageParametres, reperes: pageReperes, pps: pagePPS, 'synthese-aesh': pageSyntheseAesh, alertes: pageAlertes, dispositifs: pageDispositifs
 };
 const view = { planning: 'classe', planningSite: '', elevesFilter: {}, sort: 'classe', aeshSite: '', classeSite: '', aeshFicheType: '', semaine: '', alerteCat: '' };
 window.toggleMenu = v => document.body.classList.toggle('menu-open', typeof v === 'boolean' ? v : !document.body.classList.contains('menu-open'));
@@ -1065,7 +1101,7 @@ function setTitle(t, actions = '') { $('#title').textContent = t; $('#topactions
 /* ====================== SYNTHÈSE ====================== */
 function pageSynthese() {
   setTitle('Synthèse');
-  const g = stats(S.eleves), r = ressource();
+  const g = stats(S.eleves.filter(e => !dispositifDe(e))), r = ressourceOrdinaire();
   const hs = couvertureAnnuelle();
   const al = alertes();
   const kpi = (v, l, k = '', href = '') => href ? `<a href="${href}" class="kpi ${k}" style="text-decoration:none;color:inherit;cursor:pointer"><div class="v">${v}</div><div class="l">${l}</div></a>` : `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
@@ -1075,8 +1111,8 @@ function pageSynthese() {
   const bySite = SITES.map(s => { const st = stats(S.eleves.filter(e => e.site === s)), rs = ressource(s); return `<tr><td>${s}</td><td class="num">${st.n}</td><td class="num">${st.ind}</td><td class="num">${st.mut}</td><td class="num">${st.pending}</td><td class="num">${hf(st.cible)}</td><td class="num">${hf(st.couv)}</td><td class="num ${st.reste > 0 ? 'bad' : ''}">${hf(st.reste)}</td><td class="num">${rs.n}</td><td class="num">${hf(rs.vol)}</td><td class="num" style="color:${rs.reste < 0 ? 'var(--bad)' : 'var(--ok)'}">${hf(rs.reste)}</td></tr>`; }).join('');
   $('#page').innerHTML = `<div class="print-title">Synthèse PAS — ${esc(S.annee)}</div>
   <div class="kpis">
-    ${kpi(g.n, 'élèves suivis', '', "javascript:gotoElevesType('')")}${kpi(g.ind, 'individuels', 'indiv', "javascript:gotoElevesType('Individuel')")}${kpi(g.mut, 'mutualisés', 'mutu', "javascript:gotoElevesType('Mutualisé')")}
-    ${kpi(hf(r.vol), "volume horaire total disponible AESH / semaine (toutes les AESH, hors arrêts longue durée)", 'indiv')}${kpi(hf(hs.cible), `volume horaire total à couvrir / semaine (élèves suivis, SEGPA compris${hs.ulis ? ', + ' + hf(hs.ulis) + ' collectives ULIS' : ''})`)}${kpi(hf(hs.couv), 'volume d\'heures déjà attribuées aux AESH sur ces heures à couvrir', hs.reste > 0 ? 'warn' : 'ok')}
+    ${kpi(g.n, 'élèves suivis (hors SEGPA et ULIS)', '', "javascript:gotoElevesType('')")}${kpi(g.ind, 'individuels', 'indiv', "javascript:gotoElevesType('Individuel')")}${kpi(g.mut, 'mutualisés', 'mutu', "javascript:gotoElevesType('Mutualisé')")}
+    ${kpi(hf(r.vol), "volume horaire disponible AESH / semaine (voie ordinaire, avec la part ordinaire des AESH ULIS, hors arrêts longue durée)", 'indiv')}${kpi(hf(hs.cible), "volume horaire total à couvrir / semaine (hors élèves SEGPA et ULIS)")}${kpi(hf(hs.couv), 'volume d\'heures déjà attribuées aux AESH sur ces heures à couvrir', hs.reste > 0 ? 'warn' : 'ok')}
     ${kpi(r.manq ? '?' : hf(r.reste), r.manq ? 'volume d\'heures restant disponible (quotités manquantes)' : 'volume d\'heures restant disponible', r.manq ? 'warn' : (r.reste < 0 ? 'bad' : 'ok'))}
   </div>
   <div class="grid g4" style="margin-bottom:14px">
@@ -1779,7 +1815,7 @@ window.exportWordAesh = id => { const a = aesh(id); const c = charge(a);
   <h2>Élèves suivis</h2><table><tr><th>Élève</th><th>Classe</th><th>Type</th><th>Heures</th></tr>${affOfAesh(a).map(x => { const e = eleve(x.eleveId); return `<tr><td>${esc(e.nom)} ${esc(e.prenom)}</td><td>${esc(e.classe)}</td><td>${e.type}</td><td>${hf(x.heures)}</td></tr>`; }).join('')}</table>
   <h2>Emploi du temps</h2><table><tr><th>Jour</th><th>Horaire</th><th>Élève</th></tr>${S.creneaux.filter(x => x.aeshId === id).sort((p, q) => p.jour - q.jour || t2m(p.debut) - t2m(q.debut)).map(x => `<tr><td>${JOURS[x.jour - 1]}</td><td>${x.debut}–${x.fin}</td><td>${esc(eleve(x.eleveId)?.nom)} ${esc(eleve(x.eleveId)?.prenom)} (${esc(eleve(x.eleveId)?.classe)})</td></tr>`).join('') || '<tr><td colspan="3">Aucun</td></tr>'}</table>`); };
 window.exportWordSynthese = () => { const rows = SITES.map(s => { const st = stats(S.eleves.filter(e => e.site === s)), rs = ressource(s); return `<tr><td>${s}</td><td>${st.n}</td><td>${st.ind}</td><td>${st.mut}</td><td>${st.pending}</td><td>${hf(st.cible)}</td><td>${hf(st.couv)}</td><td>${hf(st.reste)}</td><td>${rs.n}</td><td>${hf(rs.vol)}</td><td>${hf(rs.reste)}</td></tr>`; }).join('');
-  const g = stats(S.eleves), r = ressource(), hs = couvertureAnnuelle();
+  const g = stats(S.eleves.filter(e => !dispositifDe(e))), r = ressourceOrdinaire(), hs = couvertureAnnuelle();
   wordDoc('Synthèse PAS', `<table><tr><th>Élèves suivis</th><td>${g.n}</td><th>Nombre d'heures à couvrir</th><td>${hf(hs.cible)}</td></tr><tr><th>Individuels / mutualisés</th><td>${g.ind} / ${g.mut}</td><th>Heures couvertes</th><td>${hf(hs.couv)}</td></tr><tr><th>Dossiers en cours</th><td>${g.pending}</td><th>Volume AESH / reste</th><td>${hf(r.vol)} / ${r.manq ? '?' : hf(r.reste)}</td></tr></table>
   <h2>Par site</h2><table><tr><th>Site</th><th>Suivis</th><th>Indiv.</th><th>Mutu.</th><th>Dossiers</th><th>Cibles</th><th>Couvertes</th><th>Reste</th><th>AESH</th><th>Volume</th><th>Dispo</th></tr>${rows}</table>
   <h2>Alertes</h2><ul>${alertes().map(a => `<li>${esc(a.t)}</li>`).join('') || '<li>Aucune</li>'}</ul>`); };
