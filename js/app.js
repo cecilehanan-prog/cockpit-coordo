@@ -197,6 +197,8 @@ function appliquerStatuts() {
 window.statutAuto = id => { const e = eleve(id); e.statutManuel = false; appliquerStatuts(); commit('dossier', `${e.nom} ${e.prenom} : statut recalculé d'après la date de validité`); };
 
 /* ---- dossiers « Aménagements / Notifications » et « EDT AESH » (rapprochement automatique des fichiers) ---- */
+// js/documents.js absent ou ancien (ex. sur le Mac) : l'appli continue de marcher, simplement sans rapprochement des documents
+const DOCS_LIB = () => window.DOCUMENTS || { rapprocher: () => ({ parEleve: {}, aClasser: [] }), rapprocherEdt: () => ({ parAesh: {}, aClasser: [] }), ORDRE_TYPES: ['MOPPS', 'PPS', 'MDPH / notification', 'PAI', 'PAP', 'GEVASCO', 'Contrat d’aménagement', 'Autre document'] };
 let DOSS = { source: '', maj: '', docs: { parEleve: {}, aClasser: [] }, edt: { parAesh: {}, aClasser: [] }, tous: [], nbDocs: 0, nbEdt: 0 };
 async function chargerDossiers() {
   let docs = [], edt = [], source = 'index', maj = '';
@@ -204,7 +206,7 @@ async function chargerDossiers() {
     if (window.cockpitFS) { docs = await window.cockpitFS.listDocuments(); edt = await window.cockpitFS.listEdt(); source = 'dossier'; maj = new Date().toISOString(); }
     else if (window.DOSSIERS_INDEX) { docs = window.DOSSIERS_INDEX.docs || []; edt = window.DOSSIERS_INDEX.edt || []; maj = window.DOSSIERS_INDEX.genere || ''; }
   } catch (e) { console.warn('Dossiers illisibles', e); }
-  const rapDocs = window.DOCUMENTS.rapprocher(docs, S.eleves), rapEdt = window.DOCUMENTS.rapprocherEdt(edt, S.aesh);
+  const rapDocs = DOCS_LIB().rapprocher(docs, S.eleves), rapEdt = DOCS_LIB().rapprocherEdt(edt, S.aesh);
   const tous = []; Object.values(rapDocs.parEleve).forEach(l => l.forEach(f => { f.i = tous.length; tous.push(f); })); rapDocs.aClasser.forEach(a => { a.fichier.i = tous.length; tous.push(a.fichier); });
   DOSS = { source, maj, docs: rapDocs, edt: rapEdt, tous, nbDocs: docs.length, nbEdt: edt.length };
   if (/^#\/(eleves\/|aesh\/|parametres)/.test(location.hash)) render();
@@ -265,7 +267,7 @@ window.editProfil = id => {
 };
 function carteDocuments(e) {
   const l = DOSS.docs.parEleve[e.id] || [];
-  const groupes = window.DOCUMENTS.ORDRE_TYPES.map(t => [t, l.filter(f => f.type === t)]).filter(([, x]) => x.length);
+  const groupes = (DOCS_LIB().ORDRE_TYPES || []).map(t => [t, l.filter(f => f.type === t)]).filter(([, x]) => x.length);
   const corps = groupes.length ? groupes.map(([t, x]) => `<div style="margin:6px 0"><b class="small">${esc(t)}</b><ul style="margin:3px 0 0;padding-left:18px">${x.map(f => `<li><a href="javascript:ouvrirDoc(${f.i})">${esc(f.name)}</a>${f.annee ? ` <span class="small muted">${esc(f.annee)}</span>` : ''}</li>`).join('')}</ul></div>`).join('')
     : `<p class="small muted" style="margin:4px 0 0">Aucun document trouvé. Dépose le fichier (PDF, photo…) dans le dossier « Aménagements / Notifications » avec <b>NOM Prénom</b> dans son nom : il apparaîtra ici automatiquement.</p>`;
   return `<div class="card" style="margin-top:14px"><h2>Documents <span class="small muted">MOPPS · PPS · MDPH · PAI · PAP · GEVASCO — ${l.length} fichier${l.length > 1 ? 's' : ''}</span></h2>${corps}</div>`;
