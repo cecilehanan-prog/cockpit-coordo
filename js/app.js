@@ -1112,7 +1112,8 @@ function pageSynthese() {
   $('#page').innerHTML = `<div class="print-title">Synthèse PAS — ${esc(S.annee)}</div>
   <div class="kpis">
     ${kpi(g.n, 'élèves suivis (hors SEGPA et ULIS)', '', "javascript:gotoElevesType('')")}${kpi(g.ind, 'individuels', 'indiv', "javascript:gotoElevesType('Individuel')")}${kpi(g.mut, 'mutualisés', 'mutu', "javascript:gotoElevesType('Mutualisé')")}
-    ${kpi(hf(r.vol), "volume horaire disponible AESH / semaine (voie ordinaire, avec la part ordinaire des AESH ULIS, hors arrêts longue durée)", 'indiv')}${kpi(hf(hs.cible), "volume horaire total à couvrir / semaine (hors élèves SEGPA et ULIS)")}${kpi(hf(hs.couv), 'volume d\'heures déjà attribuées aux AESH sur ces heures à couvrir', hs.reste > 0 ? 'warn' : 'ok')}
+    ${kpi(hf(r.vol), "volume horaire disponible AESH / semaine (voie ordinaire, avec la part ordinaire des AESH ULIS, hors arrêts longue durée)", 'indiv')}${(() => { const ordAct = S.eleves.filter(e => isActive(e) && !dispositifDe(e)); const hInd = ordAct.filter(e => e.type === 'Individuel').reduce((t, e) => t + (e.heures || 0), 0); const mutE = ordAct.filter(e => e.type === 'Mutualisé'); const nCl = new Set(mutE.map(e => e.classe)).size;
+      return `<div class="kpi"><div class="v">${hf(hs.cible)}</div><div class="l">volume horaire total à couvrir / semaine (hors élèves SEGPA et ULIS)</div><div class="small" style="margin-top:6px;line-height:1.45;border-top:1px solid var(--line);padding-top:5px">dont <b>${hf(hInd)}</b> pour les élèves en individuel (quotités notifiées)<br>dont <b>${hf(hs.cible - hInd)}</b> pour les mutualisés, partagées par classe${nCl ? ` (${nCl} classe${nCl > 1 ? 's' : ''}, ${mutE.length} élève${mutE.length > 1 ? 's' : ''})` : ''}</div></div>`; })()}${kpi(hf(hs.couv), 'volume d\'heures déjà attribuées aux AESH sur ces heures à couvrir', hs.reste > 0 ? 'warn' : 'ok')}
     ${kpi(r.manq ? '?' : hf(r.reste), r.manq ? 'volume d\'heures restant disponible (quotités manquantes)' : 'volume d\'heures restant disponible', r.manq ? 'warn' : (r.reste < 0 ? 'bad' : 'ok'))}
   </div>
   <div class="grid g4" style="margin-bottom:14px">
@@ -1149,7 +1150,7 @@ function weekGrid(blocks, big = false, onclickFn = 'editCreneau', conflictIds = 
     const cf = !isSplit && conflictIds && conflictIds.has(b.id);
     return `<div class="blk ${big ? 'big' : ''}${isSplit ? ' split' : ''}" style="${side};top:${top}px;height:${h - 2}px;background:${b.c};--c:${b.c};${cf ? 'outline:3px solid var(--bad);outline-offset:-3px' : ''}${b.remplace ? 'opacity:.5;border:2px dashed #fff' : ''}" title="${esc(b.title)}${cf ? ' ⚠ chevauchement' : ''}" onclick="${onclickFn}('${b.id}')">${cf ? '⚠ ' : ''}${esc(b.label)}${big && b.sub ? `<br><span style="opacity:.85">${esc(b.sub)}</span>` : ''}</div>`; }).join('')}</div>`; }).join('')}<div class="hours" style="--h:${H}px">${hours.join('')}</div></div>`;
 }
-const crBlock = (cr, mode) => { const e = eleve(cr.eleveId), a = aesh(cr.aeshId); if (!e || !a) return null; const g = cr.groupe ? ` (${cr.groupe})` : ''; const r = mode === 'aesh' && cr.remplacantId ? aesh(cr.remplacantId) : null; const rSuffix = r ? ` → remplacé par ${r.nom}` : ''; return { id: cr.id, jour: cr.jour, debut: cr.debut, fin: cr.fin, groupe: cr.groupe, remplace: !!r, c: classeColor(e.classe), title: `${e.nom} ${e.prenom} (${e.classe}${libDisp(e) ? ', ' + libDisp(e) : ''})${g} · ${a.nom} · ${cr.debut}-${cr.fin}${rSuffix}`, label: (mode === 'aesh' ? `${e.prenom} ${e.classe}` : mode === 'eleve' ? a.nom : `${ini(a)} · ${e.prenom}`) + g + (r ? ` ↪${ini(r)}` : '') }; };
+const crBlock = (cr, mode) => { const e = eleve(cr.eleveId), a = aesh(cr.aeshId); if (!e || !a) return null; const g = cr.groupe ? ` (${cr.groupe})` : ''; const r = mode === 'aesh' && cr.remplacantId ? aesh(cr.remplacantId) : null; const rSuffix = r ? ` → remplacé par ${r.nom}` : ''; return { id: cr.id, jour: cr.jour, debut: cr.debut, fin: cr.fin, groupe: cr.groupe, remplace: !!r, c: classeColor(e.classe), title: `${e.nom} ${e.prenom} (${e.classe}${libDisp(e) ? ', ' + libDisp(e) : ''})${g} · ${a.nom} · ${cr.debut}-${cr.fin}${rSuffix}`, sub: [cr.matiere, cr.salle].filter(Boolean).join(' · '), label: (mode === 'aesh' ? `${e.prenom} ${e.classe}` : mode === 'eleve' ? a.nom : `${ini(a)} · ${e.prenom}`) + g + (r ? ` ↪${ini(r)}` : '') }; };
 function pagePlanning() {
   setTitle('Planning');
   const classesUtiles = [...new Set(S.creneaux.map(x => eleve(x.eleveId)?.classe).filter(Boolean))].sort();
@@ -1746,6 +1747,8 @@ function pageParametres() {
    <div class="card"><h2>Établissement</h2><div class="form-grid"><label class="f">Nom<input type="text" id="p-etab" value="${esc(S.etablissement)}"></label><label class="f">Année scolaire<input type="text" id="p-annee" value="${esc(S.annee)}"></label></div><div class="toolbar" style="margin:10px 0 0"><button class="btn primary" onclick="S.etablissement=document.getElementById('p-etab').value;S.annee=document.getElementById('p-annee').value;commit('param','Paramètres modifiés');toast('Enregistré')">Enregistrer</button></div>
     <h2 style="margin-top:18px">Sauvegarde JSON</h2><p class="small muted">Le JSON contient tout (élèves, AESH, affectations, créneaux, journal). C'est ta sauvegarde de référence : exporte-le après chaque séance de travail et garde-le dans un dossier sûr.</p>
     <div class="toolbar"><button class="btn primary" onclick="exportJSON()">Exporter JSON</button><label class="btn">Importer JSON<input type="file" accept=".json" class="sr" onchange="importJSON(this.files[0])"></label></div>
+    <h2 style="margin-top:18px">Mise à jour préparée</h2><p class="small muted">Fichier préparé par Claude (emplois du temps AESH lus sur les EDT papier, dates de notification…) : tu vérifies les correspondances et les changements avant qu'ils soient enregistrés.</p>
+    <div class="toolbar"><label class="btn">Importer une mise à jour (EDT, fiches élèves)<input type="file" accept=".json" class="sr" onchange="importEdtAesh(this.files[0]);this.value=''"></label><button class="btn" onclick="annulerEdtAesh()">Annuler la dernière mise à jour</button></div>
     <h2 style="margin-top:18px">Excel / CSV</h2><p class="small muted">Excel = 4 onglets (Élèves, AESH, Affectation, Créneaux). Nécessite une connexion la première fois (librairie chargée à la volée) ; sinon le CSV fonctionne hors ligne.</p>
     <div class="toolbar"><button class="btn" onclick="exportExcel()">Exporter Excel</button><button class="btn" onclick="exportCSV()">Exporter CSV (élèves)</button></div>
     <h2 style="margin-top:18px">Word</h2><p class="small muted">Documents .doc ouvrables dans Word / LibreOffice : liste des élèves, fiche élève (depuis sa page), fiche AESH (depuis sa page), synthèse.</p>
@@ -1786,6 +1789,70 @@ window.nouvelleAnneeCalendrier = () => { if (!confirm('Vider les vacances et les
 window.cockpitSync = { cle: KEY, appliquer: d => { S = migrate(d); localStorage.setItem(KEY, JSON.stringify(S)); verifierRetours(); render(); } }; // retours d'absence aussi vérifiés après réception // synchro chiffrée (js/sync.js)
 window.exportJSON = () => dl(`cockpit-pas_${S.annee}_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S, null, 1));
 window.importJSON = file => { if (!file) return; const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); if (!d.eleves || !d.aesh) throw 0; S = migrate(d); log('import', `JSON importé : ${file.name}`); save(); render(); toast('Import réussi'); } catch { alert('Fichier JSON invalide.'); } }; r.readAsText(file); };
+/* ---- Mise à jour d'emplois du temps AESH depuis un fichier préparé (type « edt-aesh ») ----
+   Le fichier nomme l'AESH et les élèves (NOM Prénom) ; rien n'est remplacé avant ta validation.
+   Pour chaque AESH : ses créneaux sont remplacés par ceux du fichier (un créneau identique garde son id,
+   donc ses remplacements en cours), les heures d'affectation sont mises à jour. */
+const nrmNom = x => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z]+/g, ' ').trim();
+const motsDe = x => nrmNom(x).split(' ').filter(Boolean);
+const trouverAesh = nom => { const m = motsDe(nom); if (!m.length) return []; return S.aesh.filter(a => { const t = motsDe(a.nom); return m.every(w => t.includes(w)); }); };
+const trouverEleve = (nom, classe) => { const m = motsDe(nom); if (!m.length) return []; let L = S.eleves.filter(e => { const t = motsDe(e.nom + ' ' + e.prenom); return m.every(w => t.includes(w)); }); if (L.length > 1 && classe) { const f = L.filter(e => normClasse(e.classe) === normClasse(classe)); if (f.length) L = f; } if (L.length > 1) { const act = L.filter(isActive); if (act.length) L = act; } return L; };
+const heuresCreneaux = L => L.reduce((t, c) => t + (c.groupe ? 0.5 : 1) * Math.max(0.5, Math.round((t2m(c.fin) - t2m(c.debut)) / 30) * 0.5), 0);
+let EDT_IMPORT = null;
+window.importEdtAesh = file => { if (!file) return; const r = new FileReader(); r.onload = () => {
+  let d; try { d = JSON.parse(r.result); if (d.type !== 'edt-aesh' || (!Array.isArray(d.edt) && !Array.isArray(d.eleves))) throw 0; d.edt = d.edt || []; d.eleves = d.eleves || []; } catch { alert("Ce fichier n'est pas un fichier d'emplois du temps AESH."); return; }
+  EDT_IMPORT = d;
+  const optA = (sel) => `<option value="">— choisir —</option>` + sortAesh(S.aesh).map(a => `<option value="${a.id}" ${sel === a.id ? 'selected' : ''}>${esc(a.nom)}</option>`).join('');
+  const optE = (sel) => `<option value="">— choisir —</option>` + sortEleves(S.eleves).map(e => `<option value="${e.id}" ${sel === e.id ? 'selected' : ''}>${esc(e.nom)} ${esc(e.prenom)} — ${esc(e.classe)}${e.archive ? ' (archivé)' : ''}</option>`).join('');
+  const blocs = d.edt.map((x, i) => { const ca = trouverAesh(x.aesh); const aId = ca.length === 1 ? ca[0].id : '';
+    const noms = [...new Set(x.creneaux.map(c => c.eleve))];
+    const lignes = noms.map((n, j) => { const c0 = x.creneaux.find(c => c.eleve === n); const ce = trouverEleve(n, c0.classe); const hC = heuresCreneaux(x.creneaux.filter(c => c.eleve === n)); const hF = x.heures && x.heures[n];
+      return `<tr><td><b>${esc(n)}</b> <span class="muted small">${esc(c0.classe || '')}</span></td><td><select name="e${i}_${j}">${optE(ce.length === 1 ? ce[0].id : '')}</select>${ce.length === 1 ? '' : `<div class="small" style="color:var(--warn)">${ce.length ? 'plusieurs élèves possibles' : 'élève non trouvé'} : choisis-le</div>`}</td><td class="num">${hf(hF ?? hC)}${hF != null && Math.abs(hF - hC) > 0.01 ? `<div class="small" style="color:var(--warn)">créneaux : ${hf(hC)}</div>` : ''}</td></tr>`; }).join('');
+    return `<div class="card" style="margin:10px 0"><h3 style="margin:0 0 6px">${esc(x.aesh)}${x.contrat ? ` <span class="small muted">contrat ${hf(x.contrat)}</span>` : ''}</h3>
+      <label class="f">AESH dans le cockpit<select name="a${i}">${optA(aId)}</select></label>${aId ? '' : `<div class="small" style="color:var(--warn)">${ca.length ? 'plusieurs AESH possibles' : 'AESH non trouvée'} : choisis-la</div>`}
+      <table class="t compact" style="margin-top:8px"><thead><tr><th>Dans le fichier</th><th>Élève dans le cockpit</th><th class="num">Heures</th></tr></thead><tbody>${lignes}</tbody></table>
+      <div class="small muted">${x.creneaux.length} créneaux${x.note ? ' · ' + esc(x.note) : ''}</div></div>`; }).join('');
+  const LIB_CHAMPS = { notifDebut: 'Début notification', notifFin: 'Fin notification', gevasco: 'GEVASCO (validité)', gevascoDate: 'Dernière réunion GEVASCO', heures: "Heures à couvrir", statut: 'Statut du dossier' };
+  const valTxt = (k, v) => v == null || v === '' ? '—' : /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? frDate(v) : k === 'heures' ? hf(v) : esc(v);
+  const blocsE = d.eleves.length ? `<div class="card" style="margin:10px 0"><h3 style="margin:0 0 6px">Fiches élèves</h3><table class="t compact"><thead><tr><th>Dans le fichier</th><th>Élève dans le cockpit</th><th>Changements</th></tr></thead><tbody>${d.eleves.map((x, i) => { const ce = trouverEleve(x.eleve, x.classe); const e0 = ce.length === 1 ? ce[0] : null;
+      return `<tr><td><b>${esc(x.eleve)}</b>${x.note ? `<div class="small muted">${esc(x.note)}</div>` : ''}</td><td><select name="fe${i}">${optE(e0 ? e0.id : '')}</select>${e0 ? '' : `<div class="small" style="color:var(--warn)">${ce.length ? 'plusieurs élèves possibles' : 'élève non trouvé'} : choisis-le</div>`}</td><td class="small">${Object.entries(x.champs || {}).map(([k, v]) => `<label style="display:block"><input type="checkbox" name="fc${i}_${k}" checked> ${esc(LIB_CHAMPS[k] || k)} : ${e0 ? valTxt(k, e0[k]) + ' → ' : ''}<b>${valTxt(k, v)}</b></label>`).join('')}</td></tr>`; }).join('')}</tbody></table></div>` : '';
+  modal(`<h2>Importer une mise à jour préparée</h2><p class="small muted" style="margin:0 0 6px">Fichier : ${esc(file.name)}${d.source ? ' · ' + esc(d.source) : ''}. Vérifie les correspondances puis Enregistrer : les créneaux de chaque AESH ci-dessous sont remplacés par ceux du fichier (un créneau inchangé garde ses remplacements en cours) et ses heures par élève sont mises à jour. Les fiches élèves listées reçoivent les nouvelles valeurs cochées (le statut du dossier est recalculé d'après la date de fin de notification). Une copie de sauvegarde est gardée : bouton « Annuler la dernière mise à jour » dans Données & exports.</p>${blocsE}${blocs}
+    ${d.edt.length ? '' : '<span hidden>'}<label class="small" style="display:block;margin-top:6px"><input type="checkbox" name="retirer" checked> Retirer l'AESH des élèves qu'elle suivait et qui ne sont plus dans son nouvel EDT</label>${d.edt.length ? '' : '</span>'}`, f => appliquerEdtAesh(f));
+}; r.readAsText(file); };
+function appliquerEdtAesh(f) {
+  const d = EDT_IMPORT; if (!d) return;
+  const plans = d.edt.map((x, i) => { const noms = [...new Set(x.creneaux.map(c => c.eleve))]; const ids = {}; noms.forEach((n, j) => ids[n] = f['e' + i + '_' + j]); return { x, aId: f['a' + i], noms, ids }; });
+  const manque = plans.filter(p => !p.aId || p.noms.some(n => !p.ids[n]));
+  if (manque.length || d.eleves.some((x, i) => !f['fe' + i])) { alert('Choisis l\'AESH et chaque élève avant d\'enregistrer.'); return false; }
+  if (new Set(plans.map(p => p.aId)).size < plans.length) { alert('La même AESH est choisie pour deux emplois du temps.'); return false; }
+  try { localStorage.setItem(KEY + '-avant-edt', JSON.stringify({ le: new Date().toISOString(), etat: S })); } catch (e) { if (!confirm('Impossible de garder une copie de sauvegarde (mémoire pleine). Continuer quand même ?')) return false; }
+  const resume = [];
+  plans.forEach(({ x, aId, noms, ids }) => { const a = aesh(aId);
+    const anciens = S.creneaux.filter(c => c.aeshId === aId); const cle = c => [c.eleveId, c.jour, c.debut, c.fin, c.groupe || ''].join('|');
+    const parCle = {}; anciens.forEach(c => { (parCle[cle(c)] ||= []).push(c); });
+    const nouveaux = x.creneaux.map(c => { const n = { eleveId: ids[c.eleve], aeshId: aId, jour: +c.jour, debut: c.debut, fin: c.fin, ...(c.groupe ? { groupe: c.groupe } : {}) }; const ex = (parCle[cle(n)] || []).shift();
+      const extra = { ...(c.matiere ? { matiere: c.matiere } : {}), ...(c.salle ? { salle: c.salle } : {}) };
+      if (ex) { delete ex.matiere; delete ex.salle; return Object.assign(ex, extra); } return { id: uid('k'), ...n, ...extra }; });
+    const gardes = nouveaux.filter(c => anciens.includes(c)).length;
+    S.creneaux = S.creneaux.filter(c => c.aeshId !== aId).concat(nouveaux);
+    const suivis = new Set(Object.values(ids));
+    noms.forEach(n => { const eid = ids[n]; const h = (x.heures && x.heures[n] != null) ? +x.heures[n] : heuresCreneaux(x.creneaux.filter(c => c.eleve === n));
+      const af = S.affectations.find(y => y.aeshId === aId && y.eleveId === eid);
+      if (af) { af.heures = h; af.aConfirmer = false; } else S.affectations.push({ eleveId: eid, aeshId: aId, heures: h, aConfirmer: false }); });
+    let retires = 0; if (f.retirer) { const avant = S.affectations.length; S.affectations = S.affectations.filter(y => y.aeshId !== aId || suivis.has(y.eleveId)); retires = avant - S.affectations.length; }
+    resume.push(`${a.nom} : ${nouveaux.length} créneaux (${gardes} inchangés), ${noms.map(n => { const e = eleve(ids[n]); return `${e.nom} ${e.prenom} ${hf(S.affectations.find(y => y.aeshId === aId && y.eleveId === ids[n]).heures)}`; }).join(', ')}${retires ? `, ${retires} élève${retires > 1 ? 's' : ''} retiré${retires > 1 ? 's' : ''}` : ''}`); });
+  d.eleves.forEach((x, i) => { const e = eleve(f['fe' + i]); if (!e) return; const ch = [];
+    Object.entries(x.champs || {}).forEach(([k, v]) => { if (!f['fc' + i + '_' + k]) return; const old = e[k]; if (String(old ?? '') === String(v ?? '')) return; e[k] = v; if (CHAMPS_DOSSIER.includes(k)) { (e.manuel = e.manuel || {})[k] = true; if (e.auto) delete e.auto[k]; } if (k === 'statut') e.statutManuel = true; ch.push(`${k} ${old ?? '—'} → ${v ?? '—'}`); });
+    if (ch.length && x.champs && x.champs.notifFin && !x.champs.statut && e.statutManuel && isPending(e)) e.statutManuel = false;
+    if (ch.length) { log('eleve', `${e.nom} ${e.prenom} : ${ch.join(', ')} (mise à jour préparée)`); resume.push(`${e.nom} ${e.prenom} : ${ch.length} champ${ch.length > 1 ? 's' : ''} mis à jour`); } });
+  if (d.eleves.length) appliquerStatuts();
+  EDT_IMPORT = null;
+  commit('planning', `Mise à jour importée (${d.source || 'fichier'}) — ` + resume.join(' ; '));
+  alert('Mise à jour enregistrée :\n\n' + (resume.join('\n') || 'aucun changement'));
+}
+window.annulerEdtAesh = () => { let s; try { s = JSON.parse(localStorage.getItem(KEY + '-avant-edt') || 'null'); } catch { s = null; } if (!s) { alert('Aucune mise à jour d\'EDT à annuler.'); return; }
+  if (!confirm(`Revenir à l'état d'avant la mise à jour d'EDT du ${new Date(s.le).toLocaleString('fr-FR')} ? Ce que tu as modifié depuis serait perdu.`)) return;
+  S = migrate(s.etat); try { localStorage.removeItem(KEY + '-avant-edt'); } catch (e) { } commit('planning', 'Mise à jour d\'EDT annulée'); toast('Mise à jour annulée'); };
 const csvLine = arr => arr.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(';');
 function elevesRows() { return S.eleves.map(e => { const c = couverture(e); return { Nom: e.nom, Prénom: e.prenom, Site: e.site, Niveau: e.niveau, Classe: e.classe, Type: e.type, Statut: e.statut, "Nombre d'heures à couvrir": e.heures ?? '', 'Heures prévisionnelles': e.heuresPrev ?? '', 'Heures couvertes': couvertes(e), Couverture: c.l, AESH: affOf(e).filter(a => a.heures > 0).map(a => `${aesh(a.aeshId)?.nom} (${a.heures} h)`).join(', '), GEVASCO: e.gevasco, 'Fin notification': e.notifFin, 'N° dossier': e.numDossier, Adresse: e.adresse, Responsables: e.responsables, Téléphone: e.tel, Remarques: e.remarques, Archivé: e.archive ? 'oui' : '', 'Aménagements PPS': ppsCount(e) }; }); }
 window.exportCSV = () => { const rows = elevesRows(); dl('eleves.csv', '\uFEFF' + csvLine(Object.keys(rows[0])) + '\n' + rows.map(r => csvLine(Object.values(r))).join('\n'), 'text/csv'); };
