@@ -1,79 +1,27 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Cockpit Coordo — suivi AESH</title>
-<meta name="theme-color" content="#2f4f6b"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg">
-<meta name="apple-mobile-web-app-capable" content="yes"><link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="css/app.css?v=20261105g">
+<meta name="robots" content="noindex">
+<title>Cockpit Coordo a déménagé</title>
+<link rel="canonical" href="https://cockpit-coordo.netlify.app/">
+<meta http-equiv="refresh" content="0; url=https://cockpit-coordo.netlify.app/">
+<script>
+  // L'ancienne appli installée ici avait un service worker : on le retire pour qu'elle ne reste pas en cache.
+  if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+  if (window.caches) caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {});
+  location.replace('https://cockpit-coordo.netlify.app/' + location.search + location.hash);
+</script>
+<style>
+  body{font-family:system-ui,-apple-system,sans-serif;background:#f4f7fb;color:#1d2b3a;margin:0;padding:40px 16px;text-align:center}
+  a{color:#1f5f8b;font-weight:600}
+  @media (prefers-color-scheme:dark){body{background:#14202c;color:#e4ecf4}a{color:#8fc3ea}}
+</style>
 </head>
 <body>
-<div id="app">
-  <aside class="sidebar no-print">
-    <div class="brand">Cockpit Coordo<span id="brand-sub">Suivi AESH</span></div>
-    <nav class="nav" id="nav">
-      <a href="#/synthese"><span class="ico">◧</span>Synthèse</a>
-      <a href="#/alertes"><span class="ico">⚠</span>Alertes <span class="pill bad" id="nav-alertes" style="margin-left:6px;display:none"></span></a>
-      <a href="#/questions"><span class="ico">?</span>Questions à poser <span class="pill warn" id="nav-questions" style="margin-left:6px;display:none"></span></a>
-      <a href="#/planning"><span class="ico">▦</span>Planning</a>
-      <a href="#/ess"><span class="ico">✉</span>ESS <span class="pill warn" id="nav-ess" style="margin-left:6px;display:none"></span></a>
-      <div class="sep"></div>
-      <a href="#/absences"><span class="ico">⇄</span>Absences AESH <span class="pill bad" id="nav-absences" style="margin-left:6px;display:none"></span></a>
-      <a href="#/evals"><span class="ico">✎</span>DS demande d'accompagnement <span class="pill bad" id="nav-evals" style="margin-left:6px;display:none"></span></a>
-      <a href="#/fiches"><span class="ico">🔖</span>Fiches élèves AESH</a>
-      <div class="sep"></div>
-      <a href="#/eleves"><span class="ico">🎒</span>Élèves</a>
-      <a href="#/aesh"><span class="ico"><svg class="pic" viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true"><circle cx="7" cy="5.2" r="2.4"/><path d="M2.4 20.5v-6.4c0-2.1 1.7-3.8 3.8-3.8h1.6c1.2 0 2.3.6 3 1.5l1.9 2.4-1.7 1.4-1.6-1.9v6.8z"/><circle cx="17.6" cy="10.2" r="1.9"/><path d="M13.6 20.5v-4.4c0-1.7 1.4-3 3-3h2c1.7 0 3 1.3 3 3v4.4z"/><path d="M9.3 13.2l3.6 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg></span>AESH</a>
-      <a href="#/synthese-aesh"><span class="ico">🖨</span>Synthèse par AESH</a>
-      <a href="#/dispositifs"><span class="ico">◫</span>SEGPA / ULIS</a>
-      <a href="#/classes"><span class="ico">⌂</span>Classes</a>
-      <a href="#/affectation"><span class="ico">⊞</span>Affectation</a>
-      <a href="#/dossiers"><span class="ico">⧉</span>PPS / MOPPS</a>
-      <div class="sep"></div>
-      <a href="#/archives"><span class="ico">🗄</span>Archives</a>
-      <a href="#/bibliotheque"><span class="ico">📚</span>Bibliothèque</a>
-      <a href="#/parametres"><span class="ico">⚙</span>Données &amp; exports</a>
-      <div class="sep"></div>
-      <a href="#/reperes"><span class="ico">?</span>Repères (PAP, PPS, MDPH, ULIS)</a>
-    </nav>
-    <div class="semsel no-print" id="semsel"></div>
-    <div class="save" id="savestate"></div>
-    <div class="foot">Données stockées dans ce navigateur.<br>Exporte un JSON régulièrement.</div>
-  </aside>
-  <div class="main">
-    <header class="topbar no-print">
-      <button class="btn mob-only" id="btn-back" onclick="history.back()" aria-label="Retour">←</button>
-      <h1 id="title">Synthèse</h1>
-      <div class="grow"></div>
-      <div id="topactions"></div>
-      <button class="btn" onclick="window.print()">Imprimer / PDF</button>
-    </header>
-    <main class="page" id="page"></main>
-  </div>
-</div>
-<div id="menu-fond" class="no-print" onclick="toggleMenu(false)"></div>
-<nav id="bottombar" class="no-print" aria-label="Navigation">
-  <button type="button" onclick="toggleMenu()"><span>☰</span>Menu</button>
-  <a href="#/synthese" data-r="synthese"><span>◧</span>Synthèse</a>
-  <a href="#/alertes" data-r="alertes"><span>⚠</span>Alertes<i id="bb-alertes" hidden></i></a>
-  <a href="#/eleves" data-r="eleves"><span>🎒</span>Élèves</a>
-  <a href="#/aesh" data-r="aesh"><span><svg class="pic" viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true"><circle cx="7" cy="5.2" r="2.4"/><path d="M2.4 20.5v-6.4c0-2.1 1.7-3.8 3.8-3.8h1.6c1.2 0 2.3.6 3 1.5l1.9 2.4-1.7 1.4-1.6-1.9v6.8z"/><circle cx="17.6" cy="10.2" r="1.9"/><path d="M13.6 20.5v-4.4c0-1.7 1.4-3 3-3h2c1.7 0 3 1.3 3 3v4.4z"/><path d="M9.3 13.2l3.6 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg></span>AESH</a>
-  <a href="#/synthese-aesh" data-r="synthese-aesh"><span>☷</span>Par AESH</a>
-</nav>
-<div id="modal"></div>
-<div id="edt-print-render" class="no-print"></div>
-<script src="js/data.js?v=20261105g"></script>
-<script src="js/mopps-items.js?v=20261105g"></script>
-<script src="js/documents.js?v=20261105g"></script>
-<script src="js/dossiers-index.js?v=20261105g"></script>
-<script src="js/dossiers-donnees.js?v=20261105g"></script>
-<script src="js/pial-donnees.js?v=20261105g"></script>
-<script src="js/ess-donnees.js?v=20261105g"></script>
-<script src="js/app.js?v=20261105g"></script>
-<script src="js/fiches.js?v=20261106a"></script>
-<script src="js/sync-config.js?v=20261105g"></script>
-<script src="js/sync.js?v=20261105g"></script>
-<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");</script>
+<h1>Le cockpit a déménagé</h1>
+<p>Nouvelle adresse : <a href="https://cockpit-coordo.netlify.app/">cockpit-coordo.netlify.app</a></p>
+<p>Pense à mettre à jour ton favori ou l'icône sur l'écran d'accueil.</p>
 </body>
 </html>

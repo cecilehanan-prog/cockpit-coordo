@@ -139,10 +139,45 @@ function bandeauEssProches() {
   p.insertAdjacentHTML('afterbegin', `<div class="bandeau-ess-j2 no-print" style="background:#EAF4FF;border:1px solid #7FB2E5;border-radius:10px;padding:10px 14px;margin-bottom:12px"><b>ESS à venir</b><ul style="list-style:none;padding:0;margin:6px 0 0">${L.map(e => `<li style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:3px 0"><span><a href="#/eleves/${e.id}" style="color:inherit"><b>${esc(e.nom)} ${esc(e.prenom)}</b></a> ${libDisp(e) ? '<span class="pill warn">' + libDisp(e) + '</span> ' : ''}<span class="muted">${esc(e.classe)}</span> · ${dans(e.essDate)} (${jourDe(e.essDate)} ${frDate(e.essDate)}${e.essHeure ? ' à ' + heureTxt(e.essHeure) : ''}) · salle ${e.essSalle ? esc(e.essSalle) : '<span class="pill warn">à saisir</span>'}${aeshEss(e).length ? ' · ' + aeshEss(e).map(a => esc(a.nom.split(' ')[0])).join(', ') : ''}</span><button class="btn sm" onclick="essVu('${cleJ2(e)}')">Vu</button></li>`).join('')}</ul></div>`);
 }
 function bandeauEss() {
+  try { bandeauConseils(); } catch (x) { }
   bandeauEssProches();
   const d = essDus(); if (!d.n || /^#\/ess/.test(location.hash)) return;
   const p = $('#page'); if (!p || p.querySelector('.bandeau-ess')) return;
   p.insertAdjacentHTML('afterbegin', `<div class="bandeau-ess no-print" style="background:#FFF4E0;border:1px solid #E8B35A;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><span><b>Rappel des ESS</b> — ${essDeLaSemaine(d.c.lundi).length} ESS la semaine du ${frCourt(d.c.lundi)} : ${d.n} message${d.n > 1 ? 's' : ''} à envoyer aux AESH.</span><a class="btn sm primary" href="#/ess">Préparer les messages</a></div>`);
+}
+// tableau des ESS groupé par mois (titre du mois), ESS passées en grisé, semaine en cours surlignée, élèves sans date en orangé à la fin
+// modifier l'ESS d'un élève depuis l'onglet ESS (date, heure, salle, situation) : Enregistrer / Annuler ; la saisie n'est plus jamais écrasée par une mise à jour automatique
+window.editEss = id => { const e = eleve(id); if (!e) return;
+  modal(`<h2>ESS de ${esc(e.prenom)} ${esc(e.nom)} <span class="small muted">${esc(e.classe)}</span></h2>
+    <div class="grid g3" style="gap:10px"><label class="f">Date<input type="date" name="essDate" value="${esc(e.essDate || '')}"></label>
+    <label class="f">Heure<input type="time" name="essHeure" step="300" value="${esc(e.essHeure || '')}"></label>
+    <label class="f">Salle<input type="text" name="essSalle" value="${esc(e.essSalle || '')}" placeholder="ex. B312"></label></div>
+    <label class="f" style="margin-top:8px">Situation si pas de date<select name="essNote">${['date à fixer', 'à fixer', 'en attente', 'démission'].map(o => `<option ${(e.essNote || 'date à fixer') === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+    <p class="small muted" style="margin:8px 0 0">Laisse la date vide si elle n'est pas encore connue : la ligne reste en orangé dans « Date à fixer ». « Démission » retire l'élève du tableau.</p>
+    ${e.essDate ? `<button type="button" class="btn sm ghost" style="margin-top:8px" onclick="document.querySelector('#mform [name=essDate]').value='';document.querySelector('#mform [name=essHeure]').value=''">Effacer la date et l'heure</button>` : ''}`,
+    f => { const v = { essDate: f.essDate || '', essHeure: f.essHeure || '', essSalle: (f.essSalle || '').trim(), essNote: f.essDate ? '' : f.essNote };
+      if (v.essHeure && !v.essDate) { alert("Indique la date de l'ESS avec l'heure (ou efface l'heure)."); return false; }
+      const ch = []; Object.entries(v).forEach(([k, x]) => { const old = e[k] || ''; if (String(old) === String(x)) return; e[k] = x; (e.manuel = e.manuel || {})[k] = true; if (e.auto) delete e.auto[k]; ch.push(`${{ essDate: 'date', essHeure: 'heure', essSalle: 'salle', essNote: 'situation' }[k]} ${k === 'essDate' ? (frDate(old) || '—') + ' → ' + (frDate(x) || '—') : (old || '—') + ' → ' + (x || '—')}`); });
+      if (!ch.length) return;
+      commit('ess', `ESS de ${e.nom} ${e.prenom} : ${ch.join(', ')}`); toast('ESS enregistrée'); }); };
+function essParMois(toutes, auj, lundi) {
+  const finSem = (() => { const d = new Date(lundi + 'T12:00:00'); d.setDate(d.getDate() + 6); return isoLocal(d); })();
+  const ligne = e => { const passee = e.essDate && e.essDate < auj, semaine = e.essDate && e.essDate >= lundi && e.essDate <= finSem && !passee, jour = e.essDate === auj;
+    const d = e.essDate ? new Date(e.essDate + 'T12:00:00') : null; const A = aeshEss(e);
+    return `<tr class="ess-row ${!e.essDate ? 'afixer' : passee ? 'passee' : semaine ? 'semaine' : ''}" onclick="editEss('${e.id}')" title="Cliquer pour modifier la date, l'heure ou la salle">
+      <td class="ess-date">${d ? `<span class="ess-cal"><b>${d.getDate()}</b><small>${jourDe(e.essDate).slice(0, 3)}</small></span>` : `<span class="pill warn">${esc(e.essNote || 'date à fixer')}</span>`}</td>
+      <td class="small">${e.essHeure ? '<b>' + heureTxt(e.essHeure) + '</b>' : (e.essDate ? '<span class="muted">heure ?</span>' : '')}</td>
+      <td><a href="#/eleves/${e.id}" onclick="event.stopPropagation()" style="color:inherit" title="Ouvrir la fiche"><b>${esc(e.nom)}</b> ${esc(e.prenom)}</a>${jour ? ' <span class="pill bad">aujourd\'hui</span>' : semaine ? ' <span class="pill ok">cette semaine</span>' : passee ? ' <span class="pill neutral">passée</span>' : ''}</td>
+      <td class="small">${classeHtml(e)}</td>
+      <td class="small">${e.essSalle ? esc(e.essSalle) : (e.essDate && !passee ? '<span class="muted">salle ?</span>' : '')}</td>
+      <td class="small">${A.map(a => `<span style="white-space:nowrap"><span class="dot" style="background:${couleurAesh(a)}"></span>${esc(a.nom)}</span>`).join('<br>') || '<span class="muted">—</span>'}</td>
+      <td class="no-print" style="text-align:right"><button type="button" class="btn sm" onclick="event.stopPropagation();editEss('${e.id}')">${e.essDate ? 'Modifier' : 'Fixer la date'}</button></td></tr>`; };
+  const mois = {}; toutes.filter(e => e.essDate).forEach(e => { (mois[e.essDate.slice(0, 7)] ||= []).push(e); });
+  const tete = '<thead><tr><th style="width:70px">Date</th><th>Heure</th><th>Élève</th><th>Classe</th><th>Salle</th><th>AESH</th><th class="no-print"></th></tr></thead>';
+  const blocs = Object.keys(mois).sort().map(m => { const L = mois[m], titre = new Date(m + '-15T12:00:00').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }), fini = L.every(e => e.essDate < auj), enCours = m === auj.slice(0, 7);
+    return `<div class="ess-mois ${fini ? 'fini' : ''}"><h3 class="ess-titre-mois${enCours ? ' en-cours' : ''}">${titre.charAt(0).toUpperCase() + titre.slice(1)} <span class="pill ${fini ? 'neutral' : 'ess'}">${L.length} ESS</span>${fini ? ' <span class="small muted">terminé</span>' : ''}</h3><table class="t compact ess-t">${tete}<tbody>${L.map(ligne).join('')}</tbody></table></div>`; }).join('');
+  const sans = toutes.filter(e => !e.essDate);
+  return blocs + (sans.length ? `<div class="ess-mois"><h3 class="ess-titre-mois afixer">Date à fixer <span class="pill warn">${sans.length} élève${sans.length > 1 ? 's' : ''}</span></h3><table class="t compact ess-t">${tete}<tbody>${sans.sort((a, b) => a.classe.localeCompare(b.classe, 'fr', { numeric: true }) || a.nom.localeCompare(b.nom)).map(ligne).join('')}</tbody></table></div>` : '');
 }
 function pageEss() {
   const cible = essCible(); const lundi = essVue || cible.lundi; const aujLundi = essCible().lundi;
@@ -162,10 +197,104 @@ function pageEss() {
   <div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h2 style="margin:0">Rappel — semaine du ${frCourt(lundi)} au ${frCourt(isoLocal(fin))}${lundi === aujLundi ? ' <span class="pill ok">semaine visée</span>' : ''}</h2><span class="no-print"><button class="btn sm primary" onclick="essMailTous('${lundi}')">E-mailer toutes les AESH</button> <button class="btn sm" onclick="essSemaine(-1)">← précédente</button> <button class="btn sm" onclick="essAujourdhui()">semaine visée</button> <button class="btn sm" onclick="essSemaine(1)">suivante →</button></span></div>
     <p class="small muted" style="margin:6px 0 10px">Chaque jeudi à 10h00, l'appli te rappelle les ESS de la semaine suivante (bandeau en haut de chaque page et notification du Mac si l'appli est ouverte). Les messages sont prêts : <b>Copier pour Pronote</b>, puis colle-les dans la messagerie Pronote (l'appli ne peut pas écrire elle-même dans Pronote). Ou bien <b>Écrire par e-mail</b> : un brouillon est ouvert dans ta messagerie, adressé à l'adresse académique de l'AESH ; il ne reste qu'à cliquer sur Envoyer. « Marquer envoyé » les retire du rappel.</p>
     ${sem.length ? `<table class="t compact"><thead><tr><th>Élève</th><th>Classe</th><th>Date</th><th>Heure</th><th>Salle</th><th>AESH concerné.e.s</th></tr></thead><tbody>${rows}</tbody></table>${blocs}` : '<div class="empty">Aucune ESS cette semaine-là.</div>'}</div>
-  <div class="card" style="margin-top:14px"><h2>Toutes les ESS <span class="small muted">lues dans ${esc((D.fichiers || []).join(' · ') || 'les tableaux des ESS')}${D.genere ? ' (mise à jour du ' + frDate(D.genere.slice(0, 10)) + ')' : ''}</span></h2>
-    <table class="t compact"><thead><tr><th>Date</th><th>Heure</th><th>Élève</th><th>Classe</th><th>Salle</th><th>AESH</th></tr></thead><tbody>${toutes.map(e => `<tr style="${e.essDate && e.essDate < auj ? 'opacity:.5' : ''}"><td class="small">${e.essDate ? '<b>' + jourDe(e.essDate) + '</b> ' + frDate(e.essDate) : `<span class="pill warn">${esc(e.essNote || 'à fixer')}</span>`}</td><td class="small">${heureTxt(e.essHeure)}</td><td><a href="#/eleves/${e.id}" style="color:inherit"><b>${esc(e.nom)}</b> ${esc(e.prenom)}</a></td><td class="small">${classeHtml(e)}</td><td class="small">${esc(e.essSalle || '')}</td><td class="small">${aeshEss(e).map(a => esc(a.nom)).join(', ')}</td></tr>`).join('')}</tbody></table>
-    <p class="small muted" style="margin:8px 0 0">Les tableaux contiennent aussi des élèves qui n'ont pas d'AESH : ${(D.nonRapproches || []).length} lignes ne sont pas reprises. Les tableaux se mettent à jour en relançant la mise à jour des fiches (procédure dans scripts/LISEZ-MOI.md). La date, l'heure et la salle se corrigent dans la fiche de l'élève.</p>
+  <div class="card" style="margin-top:14px"><h2>Toutes les ESS <span class="small muted">${toutes.filter(e => e.essDate).length} datées · ${afixer.length} sans date</span></h2>
+    <div class="ess-legende small no-print"><span><i class="ess-l semaine"></i>cette semaine</span><span><i class="ess-l passee"></i>passée</span><span><i class="ess-l afixer"></i>date à fixer</span></div>
+    ${essParMois(toutes, auj, aujLundi)}
+    <p class="small muted" style="margin:8px 0 0">La date, l'heure et la salle se saisissent dans la fiche de l'élève : dès qu'une date est saisie, la ligne orangée rejoint son mois.</p>
     ${notifOk === 'default' ? '<button class="btn sm no-print" onclick="essNotifPerm()">Activer les notifications du Mac pour le rappel du jeudi</button>' : notifOk === 'denied' ? '<span class="small muted">Notifications du Mac refusées : le rappel s\'affiche seulement dans l\'appli.</span>' : ''}</div>`;
+}
+
+/* ====================== CONSEILS DE CLASSE (planning du lycée, importé via « Importer une mise à jour ») ====================== */
+// S.conseils : [{ id, date, heure, classe, precision, salle, preside, periode, manuel }] ; rappel en début de semaine (bandeau + notification du Mac), rappel le jour même
+const ccTri = (a, b) => (a.date + (a.heure || '')).localeCompare(b.date + (b.heure || '')) || (a.salle || '').localeCompare(b.salle || '') || a.classe.localeCompare(b.classe, 'fr', { numeric: true });
+const ccLib = c => c.classe + (c.precision ? ' – ' + c.precision : '');
+const ccMoment = c => new Date(c.date + 'T' + (c.heure || '23:59') + ':00');
+const ccDeLaSemaine = lundi => { const fin = new Date(lundi + 'T12:00:00'); fin.setDate(fin.getDate() + 6); const f = isoLocal(fin); return (S.conseils || []).filter(c => c.date >= lundi && c.date <= f).sort(ccTri); };
+const ccSemaineEnCours = () => { const now = new Date(); return ccDeLaSemaine(isoLocal(lundiDe(aujourdhui()))).filter(c => ccMoment(c) >= now); };
+// semaine montrée par le rappel : la semaine en cours ; le samedi et le dimanche, la semaine qui vient
+const ccLundiRappel = () => { const d = new Date(); const l = isoLocal(lundiDe(aujourdhui())); return (d.getDay() === 6 || d.getDay() === 0) ? lundiSuivant(l, 1) : l; };
+const ccRappel = () => { const lundi = ccLundiRappel(), now = new Date(); const L = ccDeLaSemaine(lundi).filter(c => ccMoment(c) >= now); return { lundi, L, vu: !!(S.conseilsVus || {})['sem:' + lundi] }; };
+// élèves suivis dans la classe du conseil (même nom de classe, sans tenir compte des espaces ni de « ULIS ») ; pour « TG + professeur », toutes les TG (groupe à vérifier)
+const ccNorm = s => normClasse(String(s || '').replace(/\bULIS\b/i, ''));
+function ccEleves(c) {
+  const k = ccNorm(c.classe), groupe = /^tg$/.test(k);
+  return S.eleves.filter(e => !e.archive && isActive(e) && (groupe ? /^tg\d*$/.test(ccNorm(e.classe)) : ccNorm(e.classe) === k)).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+}
+const ccElevesHtml = (c, court) => { const E = ccEleves(c); if (!E.length) return '<span class="muted">—</span>'; const groupe = /^tg$/.test(ccNorm(c.classe));
+  return E.map(e => { const A = aeshEss(e); return `<span style="white-space:nowrap"><a href="#/eleves/${e.id}" onclick="event.stopPropagation()" style="color:inherit"><b>${esc(e.nom)}</b> ${esc(e.prenom)}</a>${groupe ? ` <span class="muted">(${esc(e.classe)})</span>` : ''}${!court && A.length ? ' · ' + A.map(a => `<span class="dot" style="background:${couleurAesh(a)}"></span>${esc(a.nom.split(' ')[0])}`).join(', ') : ''}</span>`; }).join('<br>') + (groupe ? '<div class="muted" style="font-size:11px">groupe à vérifier</div>' : ''); };
+window.ccVuSemaine = lundi => { S.conseilsVus['sem:' + lundi] = new Date().toISOString(); commit('ess', `Rappel des conseils de classe de la semaine du ${frDate(lundi)} marqué comme vu`); };
+window.ccRevoirSemaine = lundi => { delete S.conseilsVus['sem:' + lundi]; commit('ess', `Rappel des conseils de classe de la semaine du ${frDate(lundi)} remis`); };
+function ccVerifierRappel() {
+  try { const r = ccRappel(); if (r.L.length && !S.conseilsNotif['sem:' + r.lundi]) { S.conseilsNotif['sem:' + r.lundi] = new Date().toISOString(); save();
+    toast(`${r.L.length} conseil${r.L.length > 1 ? 's' : ''} de classe la semaine du ${frCourt(r.lundi)}`);
+    if ('Notification' in window && Notification.permission === 'granted') new Notification('Cockpit Coordo — conseils de classe de la semaine', { body: r.L.map(c => `${jourDe(c.date)} ${frDate(c.date).slice(0, 5)} ${heureTxt(c.heure)} · ${ccLib(c)}${c.salle ? ' · salle ' + c.salle : ''}`).join('\n') });
+    majCompteurAlertes(); render(); } } catch (x) { }
+  try { const auj = aujourdhui(), now = new Date(); const J = (S.conseils || []).filter(c => c.date === auj && ccMoment(c) >= now && !S.conseilsNotif['j0:' + c.id]).sort(ccTri); if (J.length) { J.forEach(c => { S.conseilsNotif['j0:' + c.id] = new Date().toISOString(); }); save();
+    toast(`CONSEILS DE CLASSE AUJOURD'HUI : ${J.map(c => ccLib(c) + ' à ' + heureTxt(c.heure)).join(', ')}`);
+    if ('Notification' in window && Notification.permission === 'granted') new Notification('Cockpit Coordo — conseils de classe aujourd\'hui', { body: J.map(c => `${heureTxt(c.heure)} · ${ccLib(c)}${c.salle ? ' · salle ' + c.salle : ''}`).join('\n') });
+    majCompteurAlertes(); render(); } } catch (x) { }
+}
+function bandeauConseils() {
+  const r = ccRappel(); const p = $('#page'); if (!r.L.length || r.vu || !p || p.querySelector('.bandeau-cc') || /^#\/conseils/.test(location.hash)) return;
+  const auj = aujourdhui();
+  p.insertAdjacentHTML('afterbegin', `<div class="bandeau-cc no-print"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><b>Conseils de classe de la semaine du ${frCourt(r.lundi)}</b><span><a class="btn sm" href="#/conseils">Voir le planning</a> <button class="btn sm" onclick="ccVuSemaine('${r.lundi}')">Vu</button></span></div><ul>${r.L.map(c => `<li><span class="pill ${c.date === auj ? 'bad' : 'cc'}">${c.date === auj ? "aujourd'hui" : jourDe(c.date).slice(0, 3) + '. ' + frDate(c.date).slice(0, 5)}</span> <b>${heureTxt(c.heure)}</b> · <b>${esc(ccLib(c))}</b>${c.salle ? ' · salle ' + esc(c.salle) : ''}${c.preside ? ' <span class="muted">(' + esc(c.preside) + ')</span>' : ''}</li>`).join('')}</ul></div>`);
+}
+window.editConseil = id => { const c0 = (S.conseils || []).find(x => x.id === id); const c = c0 || { date: '', heure: '17:00', classe: '', precision: '', salle: '', preside: '', periode: '' };
+  modal(`<h2>${c0 ? 'Conseil de classe ' + esc(ccLib(c0)) : 'Ajouter un conseil de classe'}</h2>
+    <div class="grid g3" style="gap:10px"><label class="f">Date<input type="date" name="date" value="${esc(c.date)}" required></label>
+    <label class="f">Heure<input type="time" name="heure" step="300" value="${esc(c.heure || '')}"></label>
+    <label class="f">Salle<input type="text" name="salle" value="${esc(c.salle || '')}" placeholder="ex. A101"></label>
+    <label class="f">Classe<input type="text" name="classe" value="${esc(c.classe)}" placeholder="ex. TSTMG2" required></label>
+    <label class="f">Précision<input type="text" name="precision" value="${esc(c.precision || '')}" placeholder="ex. Mme Deroire"></label>
+    <label class="f">Présidé par<input type="text" name="preside" value="${esc(c.preside || '')}" placeholder="ex. F. MARTIN"></label></div>
+    <label class="f" style="margin-top:8px">Période<input type="text" name="periode" value="${esc(c.periode || '')}" placeholder="ex. 1er trimestre 2026-2027"></label>`,
+    f => { if (!f.date || !(f.classe || '').trim()) { alert('Indique au moins la date et la classe.'); return false; }
+      const v = { date: f.date, heure: f.heure || '', classe: f.classe.trim(), precision: (f.precision || '').trim(), salle: (f.salle || '').trim(), preside: (f.preside || '').trim(), periode: (f.periode || '').trim() };
+      if (c0) { Object.assign(c0, v, { manuel: true }); commit('ess', `Conseil de classe ${ccLib(c0)} modifié (${frDate(v.date)} ${heureTxt(v.heure)}, salle ${v.salle || '—'})`); }
+      else { const n = { id: uid('cc'), ...v, manuel: true }; S.conseils.push(n); commit('ess', `Conseil de classe ${ccLib(n)} ajouté (${frDate(v.date)})`); }
+      toast('Conseil de classe enregistré'); },
+    c0 ? () => { S.conseils = S.conseils.filter(x => x.id !== id); commit('ess', `Conseil de classe ${ccLib(c0)} du ${frDate(c0.date)} supprimé`); } : null); };
+let ccVue = null;
+window.ccSemaine = n => { ccVue = lundiSuivant(ccVue || ccLundiRappel(), n); render(); };
+window.ccAujourdhui = () => { ccVue = null; render(); };
+function ccParMois(toutes, auj, lundi) {
+  const finSem = (() => { const d = new Date(lundi + 'T12:00:00'); d.setDate(d.getDate() + 6); return isoLocal(d); })();
+  const tete = '<thead><tr><th style="width:70px">Date</th><th>Heure</th><th>Classe</th><th>Salle</th><th>Présidé par</th><th>Élèves suivis · AESH</th><th class="no-print"></th></tr></thead>';
+  const mois = {}; toutes.forEach(c => { (mois[c.date.slice(0, 7)] ||= []).push(c); });
+  return Object.keys(mois).sort().map(m => { const L = mois[m], titre = new Date(m + '-15T12:00:00').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }), fini = L.every(c => c.date < auj), enCours = m === auj.slice(0, 7);
+    const jours = {}; L.forEach(c => { (jours[c.date] ||= []).push(c); });
+    const corps = Object.keys(jours).sort().map(j => { const J = jours[j], d = new Date(j + 'T12:00:00'), passee = j < auj, semaine = j >= lundi && j <= finSem && !passee, jour = j === auj;
+      return `<tbody class="cc-jour ${passee ? 'passee' : semaine ? 'semaine' : ''}">${J.map((c, i) => `<tr class="ess-row" onclick="editConseil('${c.id}')" title="Cliquer pour modifier">
+        ${i === 0 ? `<td class="ess-date" rowspan="${J.length}"><span class="ess-cal"><b>${d.getDate()}</b><small>${jourDe(j).slice(0, 3)}</small></span>${jour ? '<div><span class="pill bad">aujourd\'hui</span></div>' : semaine ? '<div><span class="pill ok">cette semaine</span></div>' : ''}</td>` : ''}
+        <td class="small"><b>${heureTxt(c.heure) || '<span class="muted">heure ?</span>'}</b></td>
+        <td><b>${esc(c.classe)}</b>${c.precision ? ` <span class="muted">${esc(c.precision)}</span>` : ''}</td>
+        <td class="small">${c.salle ? `<span class="pill neutral">${esc(c.salle)}</span>` : '<span class="muted">salle ?</span>'}</td>
+        <td class="small">${esc(c.preside || '') || '<span class="muted">—</span>'}</td>
+        <td class="small">${ccElevesHtml(c)}</td>
+        <td class="no-print" style="text-align:right"><button type="button" class="btn sm" onclick="event.stopPropagation();editConseil('${c.id}')">Modifier</button></td></tr>`).join('')}</tbody>`; }).join('');
+    return `<div class="ess-mois ${fini ? 'fini' : ''}"><h3 class="ess-titre-mois cc${enCours ? ' en-cours' : ''}">${titre.charAt(0).toUpperCase() + titre.slice(1)} <span class="pill ${fini ? 'neutral' : 'cc'}">${L.length} conseil${L.length > 1 ? 's' : ''}</span>${fini ? ' <span class="small muted">terminé</span>' : ''}</h3><table class="t compact ess-t cc-t">${tete}${corps}</table></div>`; }).join('');
+}
+function pageConseils() {
+  setTitle('Conseils de classe', '<button class="btn" onclick="editConseil()">+ Ajouter un conseil</button>');
+  const auj = aujourdhui(), lundiR = ccLundiRappel(), lundi = ccVue || lundiR, now = new Date();
+  const toutes = (S.conseils || []).slice().sort(ccTri), avenir = toutes.filter(c => ccMoment(c) >= now), sem = ccDeLaSemaine(lundi), r = ccRappel();
+  const fin = new Date(lundi + 'T12:00:00'); fin.setDate(fin.getDate() + 6);
+  const kpi = (v, l, k = '') => `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  const periodes = [...new Set(toutes.map(c => c.periode).filter(Boolean))];
+  const jours = {}; sem.forEach(c => { (jours[c.date] ||= []).push(c); });
+  const cartesSem = Object.keys(jours).sort().map(j => { const d = new Date(j + 'T12:00:00'), passe = j < auj;
+    return `<div class="cc-carte ${j === auj ? 'auj' : passe ? 'passee' : ''}"><div class="cc-carte-h"><span class="ess-cal"><b>${d.getDate()}</b><small>${jourDe(j).slice(0, 3)}</small></span><b>${jourDe(j)} ${frCourt(j)}</b>${j === auj ? ' <span class="pill bad">aujourd\'hui</span>' : ''}</div>
+      ${jours[j].map(c => `<div class="cc-ligne" onclick="editConseil('${c.id}')"><span class="cc-h">${heureTxt(c.heure)}</span><span class="grow"><b>${esc(c.classe)}</b>${c.precision ? ' <span class="muted">' + esc(c.precision) + '</span>' : ''}<div class="small muted">${c.salle ? 'salle <b style="color:var(--ink,inherit)">' + esc(c.salle) + '</b>' : 'salle ?'}${c.preside ? ' · ' + esc(c.preside) : ''}</div>${ccEleves(c).length ? `<div class="small" style="margin-top:2px">${ccElevesHtml(c)}</div>` : ''}</span></div>`).join('')}</div>`; }).join('');
+  const notifOk = 'Notification' in window ? Notification.permission : 'indispo';
+  $('#page').innerHTML = `<div class="kpis" style="margin-bottom:14px">${kpi(avenir.length, 'conseils à venir')}${kpi(ccSemaineEnCours().length, 'cette semaine')}${kpi(ccDeLaSemaine(lundiSuivant(isoLocal(lundiDe(auj)), 1)).length, 'semaine suivante')}${kpi(toutes.length, 'au planning' + (periodes.length ? ' (' + esc(periodes.join(', ')) + ')' : ''))}</div>
+  <div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h2 style="margin:0">Semaine du ${frCourt(lundi)} au ${frCourt(isoLocal(fin))}${lundi === lundiR ? ' <span class="pill ok">semaine du rappel</span>' : ''}</h2><span class="no-print"><button class="btn sm" onclick="ccSemaine(-1)">← précédente</button> <button class="btn sm" onclick="ccAujourdhui()">cette semaine</button> <button class="btn sm" onclick="ccSemaine(1)">suivante →</button></span></div>
+    <p class="small muted" style="margin:6px 0 10px">Chaque lundi, l'appli te rappelle les conseils de classe de la semaine (bandeau en haut de chaque page et notification du Mac si l'appli est ouverte ; le week-end, ceux de la semaine qui vient). Le jour même, un second rappel s'affiche. « Vu » retire le bandeau pour la semaine.${lundi === lundiR && r.L.length ? (r.vu ? ` <button class="btn sm ghost no-print" onclick="ccRevoirSemaine('${lundi}')">Remettre le bandeau</button>` : ` <button class="btn sm no-print" onclick="ccVuSemaine('${lundi}')">Vu</button>`) : ''}</p>
+    ${sem.length ? `<div class="cc-cartes">${cartesSem}</div>` : '<div class="empty">Aucun conseil de classe cette semaine-là.</div>'}</div>
+  <div class="card" style="margin-top:14px"><h2>Tous les conseils de classe <span class="small muted">${toutes.length} conseil${toutes.length > 1 ? 's' : ''}${toutes[0] && toutes[0].source ? ' · ' + esc(toutes[0].source) : ''}</span></h2>
+    <div class="ess-legende small no-print"><span><i class="ess-l semaine"></i>cette semaine</span><span><i class="ess-l passee"></i>passé</span></div>
+    ${toutes.length ? ccParMois(toutes, auj, isoLocal(lundiDe(auj))) : '<div class="empty">Aucun conseil de classe enregistré. Importe le planning dans « Données &amp; exports › Importer une mise à jour », ou clique sur « + Ajouter un conseil ».</div>'}
+    <p class="small muted" style="margin:8px 0 0">Un clic sur une ligne permet de modifier la date, l'heure, la salle ou de supprimer le conseil. La colonne « Élèves suivis » montre les élèves du cockpit inscrits dans cette classe et leurs AESH.</p>
+    ${notifOk === 'default' ? '<button class="btn sm no-print" onclick="essNotifPerm()">Activer les notifications du Mac pour les rappels</button>' : ''}</div>`;
 }
 
 // Statut du dossier MDPH d'après la date de validité de la notification (documents, à défaut le tableau PIAL), sauf statut saisi à la main
@@ -219,7 +348,7 @@ function lienDoc(e, type, libelle) {
   if (!L.length) return `<span class="muted" title="Aucun ${libelle} dans le dossier de cet élève">—</span>`;
   return `<a href="javascript:ouvrirDoc(${L[0].i})" title="Ouvrir : ${esc(L[0].name)}${L.length > 1 ? ' (' + (L.length - 1) + ' autre' + (L.length > 2 ? 's' : '') + ' dans la fiche)' : ''}">${libelle}</a>${L.length > 1 ? ` <span class="muted">(${L.length})</span>` : ''}`;
 }
-const edtAesh = a => { const f = DOSS.edt.parAesh[a.id]; if (f) return { url: f.url, name: f.name }; return null; }; /* version en ligne : les photos d'EDT restent sur le Mac */
+const edtAesh = a => { const f = DOSS.edt.parAesh[a.id]; if (f) return { url: f.url, name: f.name }; return a.edt ? { url: 'edt-aesh/' + encodeURIComponent(a.edt), name: a.edt } : null; };
 // statut du dossier + date de dépôt quand le dossier est déposé (« Dossier renouvellement déposé AESHm — déposé le … »)
 // Pastille de validité de la notification (même présentation que le tableau « Décisions MDPH / PPS ») : en cours / échue / échue avec renouvellement déposé
 function pastilleValidite(e, court = false) {
@@ -287,7 +416,7 @@ function load() {
         fresh.segmentsRempl = saved.segmentsRempl || fresh.segmentsRempl;
         fresh.prisesOcc = saved.prisesOcc || fresh.prisesOcc;
         fresh.pubApercu = saved.pubApercu || false; fresh.serveur = saved.serveur || fresh.serveur; fresh.evals = saved.evals || fresh.evals; fresh.evalsVues = saved.evalsVues || fresh.evalsVues; if (saved.questions) { fresh.questions = saved.questions; fresh.questionsAjoutees = saved.questionsAjoutees; }
-        fresh.affConfirmees = saved.affConfirmees || fresh.affConfirmees; fresh.essVus = saved.essVus || fresh.essVus; fresh.prisesVues = saved.prisesVues || fresh.prisesVues; fresh.essRappels = saved.essRappels || fresh.essRappels; fresh.essNotif = saved.essNotif || fresh.essNotif; // rappels d'ESS déjà envoyés
+        fresh.affConfirmees = saved.affConfirmees || fresh.affConfirmees; fresh.essVus = saved.essVus || fresh.essVus; fresh.prisesVues = saved.prisesVues || fresh.prisesVues; fresh.essRappels = saved.essRappels || fresh.essRappels; fresh.essNotif = saved.essNotif || fresh.essNotif; fresh.conseils = saved.conseils || fresh.conseils; fresh.conseilsVus = saved.conseilsVus || fresh.conseilsVus; fresh.conseilsNotif = saved.conseilsNotif || fresh.conseilsNotif; // rappels d'ESS déjà envoyés
         fresh.absences = saved.absences || fresh.absences; // historique des absences : saisie de l'appli, conservée
         // saisies faites dans l'appli (calendrier, règles de l'équipe, souhaits, dispositif et compteur d'heures supplémentaires des AESH) : conservées
         if (saved.calendrier) fresh.calendrier = saved.calendrier;
@@ -306,7 +435,7 @@ function load() {
   } catch (e) { console.warn(e); }
   S = migrate(JSON.parse(JSON.stringify(seed)));
 }
-const QUESTIONS_INITIALES = [];
+const QUESTIONS_INITIALES = []; // version en ligne : questions nominatives retirées
 // répartitions « à confirmer » confirmées par un clic : retenues (élève + AESH + heures) même quand les données de référence sont rechargées ; si les heures changent, la confirmation est à refaire
 function cleAff(x) { return x.eleveId + '|' + x.aeshId + '|' + (x.heures ?? 0); }
 function migrate(s) {
@@ -321,6 +450,7 @@ function migrate(s) {
   s.questionsAjoutees = s.questionsAjoutees || ['q1'];
   QUESTIONS_INITIALES.forEach(q => { if (!s.questionsAjoutees.includes(q.id) && !s.questions.some(x => x.id === q.id)) { s.questions.push({ ...q }); } if (!s.questionsAjoutees.includes(q.id)) s.questionsAjoutees.push(q.id); });
   s.essVus = s.essVus || {}; s.prisesVues = s.prisesVues || null; s.essRappels = s.essRappels || {}; s.essNotif = s.essNotif || {};
+  s.conseils = s.conseils || []; s.conseilsVus = s.conseilsVus || {}; s.conseilsNotif = s.conseilsNotif || {};
   s.segmentsRempl = s.segmentsRempl || [];
   // historique des absences : une seule fiche par absence (aucun doublon quand les données de référence sont rechargées)
   s.aesh.forEach(a => { a.statut = motifNormalise(a.statut); }); s.absences.forEach(x => { x.motif = motifNormalise(x.motif); });
@@ -527,6 +657,8 @@ function alertes() {
   });
   S.affectations.filter(a => a.aConfirmer).forEach(a => { const e = eleve(a.eleveId), x = aesh(a.aeshId); if (e && x && isActive(e)) add('warn', 'Affectation', `Répartition à confirmer : ${e.nom} ${e.prenom} ↔ ${x.nom} (${hf(a.heures)})`, '#/affectation'); });
   S.affectations.forEach(a => { const e = eleve(a.eleveId), x = aesh(a.aeshId); const dp = e && x && isActive(e) ? horsDispositif(x, e) : null; if (dp) add('bad', 'Affectation', `${e.nom} ${e.prenom} est en ${dp} : seules les AESH ${dp} interviennent (${x.nom} n'en fait pas partie)`, '#/eleves/' + e.id); });
+  try { const d = essDus(); if (d.n) add('warn', 'AESH', `ESS de la semaine du ${frCourt(d.c.lundi)} : ${d.n} AESH à prévenir (${d.msgs.map(m => m.a.nom.split(' ')[0]).join(', ')}) — messages prêts dans l'onglet ESS`, '#/ess'); const sem = essSemaineEnCours(); if (sem.length) add('warn', 'Élèves', `${sem.length} ESS cette semaine : ${sem.map(e => `${e.nom} ${e.prenom} (${jourDe(e.essDate).slice(0, 3)}. ${frDate(e.essDate).slice(0, 5)}${e.essHeure ? ' ' + heureTxt(e.essHeure) : ''})`).join(', ')}`, '#/ess'); } catch (x) { }
+  try { const r = ccRappel(); if (r.L.length) add('warn', 'Élèves', `${r.L.length} conseil${r.L.length > 1 ? 's' : ''} de classe la semaine du ${frCourt(r.lundi)} : ${r.L.map(c => `${ccLib(c)} (${jourDe(c.date).slice(0, 3)}. ${frDate(c.date).slice(0, 5)} ${heureTxt(c.heure)}${c.salle ? ', salle ' + c.salle : ''})`).join(', ')}`, '#/conseils'); } catch (x) { }
   const manq = S.aesh.filter(a => a.quotite == null).length; if (manq) out.unshift({ k: 'warn', cat: 'AESH', t: `${manq} AESH sans quotité renseignée — le volume d'heures restant disponible n'est pas calculable`, h: '#/aesh' });
   chevauchements().forEach(x => { if (x.type !== 'aesh') return; const a = aesh(x.id); if (a) add('bad', 'AESH', `${a.nom} est à deux endroits le ${JOURS_LONGS[x.a.jour - 1]} (${x.a.debut}-${x.a.fin} / ${x.b.debut}-${x.b.fin})`, '#/aesh/' + a.id); });
   // signalements liés aux souhaits et aux règles de l'équipe (ils ne bloquent jamais)
@@ -641,7 +773,9 @@ function pageAlertes() {
   ${bloc('bad', 'À régler', '--bad', 'Anomalies à corriger.')}${bloc('warn', 'À décider', '--warn', 'Signalements : à toi de décider.')}`;
 }
 function majCompteurQuestions() { const el = document.getElementById('nav-questions'); if (!el) return; const n = (S.questions || []).filter(q => !q.fait).length; el.textContent = n || ''; el.style.display = n ? '' : 'none'; }
-function majCompteurEss() { majCompteurQuestions(); majCompteurEvals(); majCompteurAbsences(); const el = document.getElementById('nav-ess'); if (!el) return; const n = essDus().n + essProches().length, jj = essProches().some(e => e.essDate === aujourdhui()); el.className = 'pill ' + (jj ? 'bad' : 'warn'); el.textContent = n || ''; el.style.display = n ? '' : 'none'; }
+function majCompteurConseils() { const el = document.getElementById('nav-conseils'); if (!el) return; const sem = ccSemaineEnCours(), jj = sem.some(c => c.date === aujourdhui()); el.className = 'pill ' + (jj ? 'bad' : 'cc'); el.textContent = sem.length || ''; el.title = sem.length ? `${sem.length} conseil${sem.length > 1 ? 's' : ''} de classe cette semaine` : ''; el.style.display = sem.length ? '' : 'none'; }
+function majCompteurEss() { majCompteurQuestions(); try { majCompteurConseils(); } catch (x) { } majCompteurEvals(); majCompteurAbsences(); const el = document.getElementById('nav-ess'); if (!el) return; const sem = essSemaineEnCours(), dus = essDus().n, jj = sem.some(e => e.essDate === aujourdhui()); const n = sem.length || dus; el.className = 'pill ' + (jj ? 'bad' : sem.length ? 'ess' : 'warn'); el.textContent = n || ''; el.title = sem.length ? `${sem.length} ESS cette semaine${dus ? ' · ' + dus + ' rappel' + (dus > 1 ? 's' : '') + ' à envoyer aux AESH' : ''}` : dus ? `${dus} rappel${dus > 1 ? 's' : ''} d'ESS à envoyer aux AESH` : ''; el.style.display = n ? '' : 'none'; }
+const essSemaineEnCours = () => { const now = new Date(); return essDeLaSemaine(isoLocal(lundiDe(aujourdhui()))).filter(e => essMoment(e) >= now); };
 function majCompteurAlertes() { majCompteurEss(); const el = document.getElementById('nav-alertes'); if (!el) return; const n = alertes().length; const bb = document.getElementById('bb-alertes'); if (bb) { bb.textContent = n; bb.hidden = !n; } el.textContent = n || ''; el.style.display = n ? '' : 'none'; }
 
 /* ====================== SYNTHÈSE PAR AESH (impression) ====================== */
@@ -772,6 +906,8 @@ function datesImpactees(cr, ab) {
   return out;
 }
 // créneaux de l'AESH touchés par son absence en cours (chacun avec ses dates : _dates)
+// prises faites par l'équipe dans l'appli en ligne pour ce créneau (une par date)
+const prisesEnLigne = cr => (S.prisesOcc || []).filter(p => p.creneauId === cr.id && (!cr._dates || cr._dates.includes(p.date))).sort((x, y) => x.date.localeCompare(y.date));
 function creneauxACouvrir(aid) {
   const ab = absenceOuverte(aid); if (!ab) return [];
   return S.creneaux.filter(c => c.aeshId === aid && eleve(c.eleveId)).map(c => ({ ...c, _dates: datesImpactees(c, ab) })).filter(c => c._dates.length)
@@ -830,7 +966,7 @@ function apercuEleve(e) {
 function construirePublication() {
   const ouv = (S.absences || []).filter(x => x.ouvert), occ = [];
   ouv.forEach(ab => creneauxACouvrir(ab.aeshId).filter(c => !c.remplacantId).forEach(c => { const e = eleve(c.eleveId);
-    datesAVenir(c).map(dt => ({ id: c.id + '@' + dt, date: dt, debut: c.debut, fin: c.fin, semaine: quinzaineDe(dt) })).forEach(o => occ.push({ ...o, creneauId: c.id, absenceId: ab.id, absentId: ab.aeshId, classe: e.classe, dispositif: libDisp(e) || (dispositifDe(e) || ''), site: e.site, matiere: sansNomEleve(c.matiere), ...(S.pubApercu ? { prenom: e.prenom, apercu: apercuEleve(e) } : {}) })); }));
+    datesAVenir(c).map(dt => ({ id: c.id + '@' + dt, date: dt, debut: c.debut, fin: c.fin, semaine: quinzaineDe(dt) })).filter(o => !(S.prisesOcc || []).some(p => p.occId === o.id && p.parCoordination)).forEach(o => occ.push({ ...o, creneauId: c.id, absenceId: ab.id, absentId: ab.aeshId, classe: e.classe, dispositif: libDisp(e) || (dispositifDe(e) || ''), site: e.site, matiere: sansNomEleve(c.matiere), ...(S.pubApercu ? { prenom: e.prenom, apercu: apercuEleve(e) } : {}) })); }));
   const quinzaines = {}; for (let i = 0, d = lundiDe(aujourdhui()); i < 12; i++, d.setDate(d.getDate() + 7)) quinzaines[isoLocal(d)] = quinzaineDe(isoLocal(d)) || null;
   const aeshL = S.aesh.filter(a => !absente(a) && a.email).map(a => ({ id: a.id, nom: a.nom, email: a.email, dispositif: a.dispositif || null, classes: [...new Set(affOfAesh(a).filter(x => x.heures > 0).map(x => (eleve(x.eleveId) || {}).classe).filter(Boolean))],
     occupations: S.creneaux.filter(c => c.aeshId === a.id || c.remplacantId === a.id).map(c => ({ jour: c.jour, debut: c.debut, fin: c.fin, groupe: c.groupe || null })) }));
@@ -868,6 +1004,7 @@ function integrerPrises(prises) {
   let ajout = 0, retrait = 0, rejet = 0;
   (prises || []).forEach(p => {
     const i = S.prisesOcc.findIndex(x => x.occId === p.occId);
+    if (i >= 0 && S.prisesOcc[i].parCoordination) return; // la décision de la coordination prime sur l'appli en ligne
     if (p.annulee) { if (i >= 0) { S.prisesOcc.splice(i, 1); retrait++; } return; }
     // verrou du passé : une prise de l'équipe enregistrée après le début du cours n'est pas retenue ; une décision de la coordination l'est toujours
     if (!p.priseLe || (!p.parCoordination && p.priseLe >= `${p.date}T${p.debut}`)) { rejet++; return; }
@@ -885,19 +1022,19 @@ window.importerPrises = async ev => {
 window.prisesActualiser = async (silencieux = false) => {
   if (!serveurOK()) return false;
   try {
-    const j = await apiServeur('/api/admin/prises'), avant = new Set(S.prisesOcc.map(p => p.occId)), r = integrerPrises(j.prises);
+    const j = await apiServeur('/api/admin/prises'), avant = new Set(S.prisesOcc.map(p => p.occId)), r = integrerPrises(j.prises); window.prisesEtat = { ok: true, le: new Date().toTimeString().slice(0, 5), n: (j.prises || []).filter(p => !p.annulee).length };
     if (S.prisesVues === null) S.prisesVues = [...avant]; // première synchro : on ne notifie pas l'existant
     const neuves = S.prisesOcc.filter(p => !avant.has(p.occId));
     if (r.ajout || r.retrait) { save(); majCompteurAbsences(); if (/^#\/(absences|aesh\/)/.test(location.hash)) render(); }
     if (neuves.length && silencieux) { const t = neuves.map(p => `${(aesh(p.remplacantId) || {}).nom || '?'} remplace ${(aesh(p.absentId) || {}).nom || '?'} le ${p.date.slice(8, 10)}/${p.date.slice(5, 7)}`).join(' ; '); toast('Remplacement pris : ' + t); try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Cockpit Coordo — remplacement pris', { body: t }); } catch (x) { } }
     return true;
-  } catch (x) { return false; }
+  } catch (x) { window.prisesEtat = { ok: false, le: new Date().toTimeString().slice(0, 5), msg: String(x && x.message || x) }; if (!silencieux) toast('Appli en ligne : ' + window.prisesEtat.msg.slice(0, 90)); return false; }
 };
 function majCompteurAbsences() { const el = document.getElementById('nav-absences'); if (!el) return; const vues = new Set(S.prisesVues || []), n = (S.prisesOcc || []).filter(p => !vues.has(p.occId)).length; el.textContent = n || ''; el.style.display = n ? '' : 'none'; majTitreEtBadge(); }
 // pastille sur l'icône de l'appli quand c'est possible (navigateur / PWA) et dans le titre de l'onglet
 function majTitreEtBadge() {
   const tot = ['nav-evals', 'nav-absences', 'nav-ess', 'nav-alertes', 'nav-questions'].slice(0, 3).reduce((t, id) => { const e = document.getElementById(id); return t + (e && e.style.display !== 'none' ? parseInt(e.textContent) || 0 : 0); }, 0);
-  document.title = (tot ? `(${tot}) ` : '') + 'Cockpit Coordo — suivi AESH'; try { if (navigator.setAppBadge) tot ? navigator.setAppBadge(tot) : navigator.clearAppBadge(); } catch (x) { }
+  document.title = (tot ? `(${tot}) ` : '') + 'Cockpit Coordo — suivi AESH'; const bm = document.getElementById('bb-menu'); if (bm) { bm.textContent = tot; bm.hidden = !tot; } try { if (navigator.setAppBadge) tot ? navigator.setAppBadge(tot) : navigator.clearAppBadge(); } catch (x) { }
 }
 /* ====================== QUESTIONS À POSER (réunions) ====================== */
 window.questionAjouter = () => { const t = ($('#q-texte').value || '').trim(); if (!t) return; S.questions.unshift({ id: uid('q'), texte: t, pour: ($('#q-pour').value || '').trim(), lien: '', creeLe: aujourdhui(), fait: false, reponse: '' }); commit('question', 'Question ajoutée : ' + t.slice(0, 60)); };
@@ -927,18 +1064,23 @@ async function apiServeur(chemin, corps) {
   const r = await fetch(S.serveur.url + chemin, opt), j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.erreur || 'Erreur ' + r.status); return j;
 }
-function majCompteurEvals() { const el = document.getElementById('nav-evals'); if (!el) return; const n = (S.evals.demandes || []).filter(d => d.statut === 'nouvelle' || (d.statut === 'proposee' && (d.candidats || []).some(c => c.positionne))).length; el.textContent = n || ''; el.style.display = n ? '' : 'none'; majTitreEtBadge(); }
+function majCompteurEvals() { const el = document.getElementById('nav-evals'); if (!el) return; const n = (S.evals.demandes || []).filter(d => d.statut === 'nouvelle' || (d.statut === 'proposee' && (d.candidats || []).some(c => c.positionne)) || (d.statut === 'acceptee' && d.desiste && d.date >= aujourdhui())).length; el.textContent = n || ''; el.style.display = n ? '' : 'none'; majTitreEtBadge(); }
 // les demandes des enseignant.e.s arrivent directement de l'appli en ligne (même clé que l'envoi automatique) ; contrôle toutes les 2 minutes
 window.evalsActualiser = async (silencieux = false) => {
   if (!serveurOK()) { if (!silencieux) toast('Renseigne l’adresse et la clé de l’appli en ligne (Absences AESH → Envoi automatique)'); return false; }
   try {
-    const anciennes = (S.evals.demandes || []).slice(); const j = await apiServeur('/api/admin/demandes'); S.evals = { maj: j.genere || '', demandes: j.demandes || [] }; evalsEtat = { ok: true, msg: '', le: new Date().toTimeString().slice(0, 5) };
+    const anciennes = (S.evals.demandes || []).slice(), avantTxt = JSON.stringify(anciennes); const j = await apiServeur('/api/admin/demandes'); S.evals = { maj: j.genere || '', demandes: j.demandes || [] }; const change = JSON.stringify(S.evals.demandes) !== avantTxt; evalsEtat = { ok: true, msg: '', le: new Date().toTimeString().slice(0, 5) };
     const neuves = S.evals.demandes.filter(d => d.statut === 'nouvelle' && !S.evalsVues.includes(d.id));
     const posAvant = {}; (anciennes || []).forEach(d => { posAvant[d.id] = (d.candidats || []).filter(c => c.positionne).length; }); const positionnees = S.evals.demandes.filter(d => d.statut === 'proposee' && (d.candidats || []).filter(c => c.positionne).length > (posAvant[d.id] ?? 0) && anciennes && anciennes.length);
-    save(); majCompteurEvals();
-    if (positionnees.length && silencieux) toast(`${positionnees.length > 1 ? positionnees.length + ' demandes ont' : 'Une demande a'} reçu une nouvelle candidature : à valider`);
+    const avantD = {}; anciennes.forEach(d => { avantD[d.id] = d; });
+    const desistees = anciennes.length ? S.evals.demandes.filter(d => d.statut === 'acceptee' && d.desiste && d.date >= aujourdhui() && !(avantD[d.id] && avantD[d.id].statut === 'acceptee' && avantD[d.id].desiste)) : [];
+    const retraits = anciennes.length ? S.evals.demandes.filter(d => d.statut === 'proposee' && avantD[d.id] && avantD[d.id].statut === 'proposee' && (avantD[d.id].candidats || []).some(c => c.positionne && !(d.candidats || []).some(x => x.id === c.id && x.positionne))) : [];
+    if (change) save(); majCompteurEvals(); // n'enregistre (et ne synchronise) que s'il y a du nouveau
+    if (positionnees.length && silencieux) { const t = `${positionnees.length > 1 ? positionnees.length + ' demandes ont' : 'Une demande a'} reçu une nouvelle candidature : à valider`; toast(t); try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Cockpit Coordo — une collègue s\'est positionnée', { body: t }); } catch (x) { } }
+    if (desistees.length) { const t = desistees.map(d => `${(aesh(d.aeshId) || {}).nom || 'L\'AESH validée'} s'est désistée pour le ${frDate(d.date)} ${hh(d.debut)} (${d.classe}) : propose la demande à une autre AESH`).join(' · '); toast(t); try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Cockpit Coordo — une AESH s\'est désistée', { body: t }); } catch (x) { } }
+    if (retraits.length) { const t = `${retraits.length > 1 ? retraits.length + ' demandes :' : 'Une demande :'} une AESH a retiré sa proposition`; toast(t); try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Cockpit Coordo — proposition retirée', { body: t }); } catch (x) { } }
     if (neuves.length && silencieux) { toast(`Nouvelle demande d'accompagnement : ${neuves.length}`); try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Cockpit Coordo — DS demande d\'accompagnement', { body: `${neuves.length} nouvelle${neuves.length > 1 ? 's' : ''} demande${neuves.length > 1 ? 's' : ''} d'un.e enseignant.e` }); } catch (x) { } }
-    if (/^#\/evals/.test(location.hash)) render(); return true;
+    if (change && /^#\/evals/.test(location.hash)) render(); return true;
   } catch (x) { evalsEtat = { ok: false, msg: erreurServeur(x), le: new Date().toTimeString().slice(0, 5) }; if (!silencieux) toast('Appli en ligne : ' + evalsEtat.msg.slice(0, 90) + '…'); if (/^#\/evals/.test(location.hash)) render(); return false; }
 };
 // « 4e8 », « 4e 8 », « 4ème 8 » désignent la même classe
@@ -994,12 +1136,13 @@ function pageEvals() {
     const eleves = elevesClasse(d.classe).filter(e => affOf(e).some(x => x.heures > 0));
     const acts = d.statut === 'nouvelle' ? `<button class="btn primary sm" onclick="evalProposer('${d.id}')">Proposer aux AESH…</button> <button class="btn sm" onclick="evalRefuser('${d.id}')">Refuser</button>`
       : d.statut === 'proposee' ? `${pos.map(c => `<button class="btn primary sm" onclick="evalValider('${d.id}','${c.id}')">Valider ${esc(c.nom)}</button>`).join(' ') || '<span class="small muted">Aucune AESH positionnée pour l\'instant.</span>'} <button class="btn sm" onclick="evalElargir('${d.id}')" ${d.visibleA ? '' : 'disabled'}>Élargir à toute l'équipe</button> <button class="btn sm" onclick="evalRefuser('${d.id}')">Refuser</button> <button class="btn sm ghost" onclick="evalAnnuler('${d.id}')">Annuler</button>`
+      : d.statut === 'acceptee' && d.desiste ? `<button class="btn primary sm" onclick="evalProposer('${d.id}')">Proposer à une autre AESH…</button> <button class="btn sm ghost" onclick="evalAnnuler('${d.id}')">Annuler</button>`
       : d.statut === 'acceptee' ? `<button class="btn sm" onclick="evalInfos('${d.id}')">${d.liberee ? 'Modifier l’élève et les aides' : 'Communiquer l’élève et les aides'}</button> <button class="btn sm ghost" onclick="evalAnnuler('${d.id}')">Annuler</button>` : '';
-    return `<div class="card" style="margin-bottom:12px;border-left:4px solid var(--${d.statut === 'nouvelle' ? 'bad' : d.statut === 'acceptee' ? 'ok' : 'warn'})"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h2 style="margin:0">${jourDe(d.date)} ${frDate(d.date)} · ${hh(d.debut)}–${hh(d.fin)}</h2><span><span class="pill ${k}">${lib}</span>${d.liberee ? ' <span class="pill ok">infos élève communiquées</span>' : ''}</span></div>
+    return `<div class="card" style="margin-bottom:12px;border-left:4px solid var(--${d.statut === 'nouvelle' || d.desiste ? 'bad' : d.statut === 'acceptee' ? 'ok' : 'warn'})"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h2 style="margin:0">${jourDe(d.date)} ${frDate(d.date)} · ${hh(d.debut)}–${hh(d.fin)}</h2><span><span class="pill ${k}">${lib}</span>${d.liberee ? ' <span class="pill ok">infos élève communiquées</span>' : ''}</span></div>
       <div style="margin:4px 0"><b>${esc(d.type)}</b> · classe <b>${esc(d.classe)}</b> · salle <b>${esc(d.salle)}</b> · demandé par ${esc(d.profNom || d.prof)}${d.notifie ? ' · <span class="pill ok">élève notifié</span>' : ''}${d.commentaire ? ` <span class="muted">— « ${esc(d.commentaire)} »</span>` : ''}</div>
       <div class="small muted" style="margin:4px 0">${eleves.length ? 'Élèves suivis dans cette classe (visible de toi seule) : ' + eleves.map(e => `${esc(e.nom)} ${esc(e.prenom)}${libDisp(e) ? ' (' + libDisp(e) + ')' : ''} → ${affOf(e).filter(x => x.heures > 0).map(x => esc((aesh(x.aeshId) || {}).nom || '?')).join(', ')}`).join(' · ') : 'Aucun élève suivi par une AESH dans cette classe.'}</div>
       ${d.statut === 'proposee' ? `<div class="small" style="margin:4px 0">${d.visibleA ? `Proposée à ${d.visibleA.length} AESH (${d.visibleA.map(id => esc((aesh(id) || {}).nom || id)).join(', ')})` : 'Proposée à toute l\'équipe'} · ${pos.length} positionnée${pos.length > 1 ? 's' : ''}${pos.length ? ' : ' + pos.map(c => esc(c.nom) + (c.libre ? '' : ' (a cours : laisserait son élève)') + (c.suitClasse ? ' ★' : '')).join(', ') : ''}</div>` : ''}
-      ${d.statut === 'acceptee' ? `<div class="small" style="margin:4px 0">AESH validée : <b>${esc((cands.find(c => c.id === d.aeshId) || aesh(d.aeshId) || {}).nom || d.aesh || '')}</b></div>` : ''}
+      ${d.statut === 'acceptee' ? `<div class="small" style="margin:4px 0">AESH validée : <b>${esc((cands.find(c => c.id === d.aeshId) || aesh(d.aeshId) || {}).nom || d.aesh || '')}</b>${d.desiste ? ' <span class="pill bad">⚠ s\'est désistée</span> : propose la demande à une autre AESH (l\'enseignant.e recevra un nouveau mail de validation).' : ''}</div>` : ''}
       ${d.reponse ? `<div class="small muted">Réponse : ${esc(d.reponse)}</div>` : ''}<div class="no-print" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${acts}</div></div>`; };
   $('#page').innerHTML = `<div class="kpis" style="margin-bottom:14px">${kpi(n('nouvelle'), 'à traiter', n('nouvelle') ? 'bad' : 'ok')}${kpi(n('proposee'), 'proposées aux AESH', n('proposee') ? 'warn' : '')}${kpi(n('acceptee'), 'validées à venir', 'ok')}${kpi(L.length, 'demandes reçues')}</div>
     ${serveurOK() && evalsEtat.ok === false ? `<div class="card" style="margin-bottom:14px;border-left:4px solid var(--bad)"><b>L'appli en ligne ne répond pas</b> <span class="small">(${evalsEtat.le})</span><div class="small" style="margin:4px 0 8px">${esc(evalsEtat.msg)}</div><button class="btn sm" onclick="evalsActualiser()">Réessayer</button> <a class="btn sm" href="#/absences">Vérifier l'adresse et la clé</a></div>` : serveurOK() && evalsEtat.ok ? `<div class="small muted" style="margin-bottom:8px">✓ Appli en ligne reliée · actualisé à ${evalsEtat.le}</div>` : ''}
@@ -1009,17 +1152,17 @@ function pageEvals() {
     ${autres.length ? `<div class="card" style="margin-top:14px"><h2>Terminées, refusées ou passées <span class="pill neutral">${autres.length}</span></h2><table class="t compact"><tbody>${autres.slice(-15).reverse().map(d => `<tr><td class="small">${frDate(d.date)} ${hh(d.debut)}</td><td class="small">${esc(d.classe)} · ${esc(d.salle)}</td><td class="small">${esc(d.profNom || d.prof)}</td><td class="small">${esc((STATUTS_EVAL[d.statut] || [d.statut])[0])}${d.aesh ? ' · ' + esc(d.aesh) : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
 }
 function pageAbsences() {
-  S.prisesVues = (S.prisesOcc || []).map(p => p.occId); save(); majCompteurAbsences();
+  { const vues = (S.prisesOcc || []).map(p => p.occId); if (JSON.stringify(vues) !== JSON.stringify(S.prisesVues || [])) { S.prisesVues = vues; save(); } majCompteurAbsences(); }
   setTitle('Absences AESH', `<button class="btn primary" onclick="declarerAbsence()">+ Déclarer une absence</button>`);
   const ouvertes = (S.absences || []).filter(x => x.ouvert), st = statsAbsences();
-  const toutes = ouvertes.flatMap(ab => creneauxACouvrir(ab.aeshId)), pris = toutes.filter(c => c.remplacantId).length;
+  const toutes = ouvertes.flatMap(ab => creneauxACouvrir(ab.aeshId)), pris = toutes.filter(c => c.remplacantId || prisesEnLigne(c).length).length;
   const heuresACouvrir = toutes.filter(c => !c.remplacantId).reduce((t, c) => t + poidsCreneau(c.debut, c.fin) * c._dates.length, 0);
   const kpi = (v, l, k = '') => `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
   const cartes = ouvertes.map(ab => { const a = aesh(ab.aeshId); if (!a) return ''; const L = creneauxACouvrir(ab.aeshId), per = `${ab.debut ? 'du ' + frDate(ab.debut) : ''}${ab.fin ? ' au ' + frDate(ab.fin) : ' — fin à préciser'}`;
     const rows = L.map(cr => { const e = eleve(cr.eleveId), cand = candidatsRemplacement(cr);
       return `<tr><td class="small"><b>${cr._dates.slice(0, 4).map(dateCourte).join(', ')}${cr._dates.length > 4 ? ' …(+' + (cr._dates.length - 4) + ')' : ''}</b><br>${cr.debut}–${cr.fin}</td><td class="small">${classeHtml(e)}${sansNomEleve(cr.matiere) ? ' · <span class="muted">' + esc(sansNomEleve(cr.matiere)) + '</span>' : ''}</td><td class="small muted"><a href="#/eleves/${e.id}" style="color:inherit">${esc(e.nom)} ${esc(e.prenom)}</a></td>
-        <td><select onchange="assignerRemplacant('${cr.id}',this.value)" style="min-width:230px"><option value="">— à couvrir —</option>${cand.map(c => `<option value="${c.id}" ${cr.remplacantId === c.id ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select></td><td>${cr.remplacantId ? `<span class="pill ok">pris</span>${cr.remplacantDepuis ? `<div class="small muted">depuis le ${frDate(cr.remplacantDepuis.slice(0, 10))} à ${cr.remplacantDepuis.slice(11)}</div>` : ''}` : '<span class="pill warn">à couvrir</span>'}</td></tr>`; }).join('');
-    const nbPris = L.filter(c => c.remplacantId).length;
+        <td><select onchange="assignerRemplacant('${cr.id}',this.value)" style="min-width:230px"><option value="">— à couvrir —</option>${cand.map(c => `<option value="${c.id}" ${cr.remplacantId === c.id ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select></td><td>${prisesEnLigne(cr).length ? `<div style="margin-bottom:4px">${prisesEnLigne(cr).map(p => `<span class="pill ok" title="${p.parCoordination ? 'Attribué par la coordination' : 'Pris dans l\'appli en ligne'} le ${frDate(p.priseLe.slice(0, 10))} à ${p.priseLe.slice(11)}">✓ ${esc(((aesh(p.remplacantId) || {}).nom || '?').split(' ')[0])} · ${dateCourte(p.date)}</span> <button class="btn sm no-print" style="padding:1px 7px" title="Mettre quelqu'un d'autre" onclick="changerPriseOcc('${esc(p.occId)}')">Changer</button> <button class="btn sm no-print" style="padding:1px 7px" title="La collègue ne vient pas : libérer le créneau" onclick="retirerPriseOcc('${esc(p.occId)}')">Retirer</button>`).join('<br>')}</div>` : ''}${cr.remplacantId ? `<span class="pill ok">pris</span>${cr.remplacantDepuis ? `<div class="small muted">depuis le ${frDate(cr.remplacantDepuis.slice(0, 10))} à ${cr.remplacantDepuis.slice(11)}</div>` : ''}` : (datesAVenir(cr).every(dt => prisesEnLigne(cr).some(p => p.date === dt)) && prisesEnLigne(cr).length ? '' : `<span class="pill warn">${prisesEnLigne(cr).length ? 'autres dates à couvrir' : 'à couvrir'}</span>`)}</td></tr>`; }).join('');
+    const nbPris = L.filter(c => c.remplacantId || prisesEnLigne(c).length).length;
     return `<div class="card" style="margin-bottom:14px;border-left:4px solid var(--warn)"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h2 style="margin:0"><a href="#/aesh/${a.id}" style="color:inherit" title="Voir son emploi du temps et les remplaçant.e.s">${esc(a.nom)}</a> <span class="pill warn">${esc(ab.motif || a.statut)}</span> <span class="small muted">${per}</span></h2>
       <span class="no-print"><button class="btn sm primary" onclick="prevenirEquipe('${a.id}')">Prévenir l'équipe</button> <button class="btn sm" onclick="finAbsence('${a.id}')">Fin d'absence</button></span></div>
       <div class="small muted" style="margin:6px 0 8px">${nbPris} créneau${nbPris > 1 ? 'x' : ''} pris sur ${L.length}. Les propositions tiennent compte des disponibilités, des dispositifs (ULIS / SEGPA), des souhaits et de la quotité (✓ convient · ⚠ avec réserve · ✗ indisponible). 🔒 Une heure déjà passée ne peut plus être attribuée : la personne qui remplace n'est créditée que des cours qui commencent après le moment où le créneau est pris, et si on change de remplaçant.e, les cours déjà passés restent à la personne précédente. Le créneau pris apparaît sur l'EDT de ${esc(a.nom.split(' ')[0])} et sur la fiche de la personne qui remplace.</div>
@@ -1035,7 +1178,7 @@ function pageAbsences() {
       <table class="t compact"><thead><tr><th>AESH</th><th class="num">Absences</th><th class="num">Jours d'absence</th><th class="num">Créneaux remplacés</th><th class="num">Heures de remplacement</th><th class="num">Dont en plus de la quotité</th><th class="num">Heures sup. à récupérer</th></tr></thead><tbody>${compteurs}</tbody></table>
       <p class="small muted" style="margin:8px 0 0"><b>Comment lire :</b> les heures de remplacement comptent chaque semaine scolaire écoulée depuis la prise du créneau (vacances, jours fériés et semaines Q1 / Q2 respectés). Les heures faites au-delà de la quotité sont mises de côté dans le compteur d'heures supplémentaires de la fiche AESH, à récupérer plus tard.</p></div>
     ${histo ? `<div class="card" style="margin-top:14px"><h2>Absences terminées</h2><table class="t compact"><thead><tr><th>AESH</th><th>Motif</th><th>Période</th><th class="no-print"></th></tr></thead><tbody>${histo}</tbody></table></div>` : ''}
-    ${(S.prisesOcc || []).length ? `<div class="card" style="margin-top:14px"><h2>Créneaux pris dans l'appli en ligne</h2><table class="t compact"><thead><tr><th>Date</th><th>Horaire</th><th>Absence de</th><th>Pris par</th><th>Pris le</th><th class="no-print"></th></tr></thead><tbody>${S.prisesOcc.slice().sort((x, y) => (y.date + y.debut).localeCompare(x.date + x.debut)).map(p => { const ab = aesh(p.absentId), r = aesh(p.remplacantId); return `<tr><td>${frDate(p.date)}</td><td>${hh(p.debut)}–${hh(p.fin)}</td><td>${esc(ab ? ab.nom : '?')}</td><td>${esc(r ? r.nom : '?')}${p.parCoordination ? ' <span class="pill warn">coordination</span>' : ''}</td><td class="small muted">${frDate(p.priseLe.slice(0, 10))} ${p.priseLe.slice(11)}</td><td class="no-print" style="text-align:right"><button class="btn sm" onclick="supprimerPriseOcc('${esc(p.occId)}')">Supprimer</button></td></tr>`; }).join('')}</tbody></table></div>` : ''}
+    ${(S.prisesOcc || []).length ? `<div class="card" style="margin-top:14px"><h2>Créneaux pris dans l'appli en ligne</h2><table class="t compact"><thead><tr><th>Date</th><th>Horaire</th><th>Absence de</th><th>Pris par</th><th>Pris le</th><th class="no-print"></th></tr></thead><tbody>${S.prisesOcc.slice().sort((x, y) => (y.date + y.debut).localeCompare(x.date + x.debut)).map(p => { const ab = aesh(p.absentId), r = aesh(p.remplacantId); return `<tr><td>${frDate(p.date)}</td><td>${hh(p.debut)}–${hh(p.fin)}</td><td>${esc(ab ? ab.nom : '?')}</td><td>${esc(r ? r.nom : '?')}${p.parCoordination ? ' <span class="pill warn">coordination</span>' : ''}</td><td class="small muted">${frDate(p.priseLe.slice(0, 10))} ${p.priseLe.slice(11)}</td><td class="no-print" style="text-align:right"><button class="btn sm" onclick="changerPriseOcc('${esc(p.occId)}')">Changer</button> <button class="btn sm" onclick="retirerPriseOcc('${esc(p.occId)}')">Retirer</button></td></tr>`; }).join('')}</tbody></table></div>` : ''}
     <div class="card no-print" style="margin-top:14px"><h2>Envoi automatique aux collègues <span class="pill ${S.serveur && S.serveur.url && S.serveur.cle ? 'ok' : 'neutral'}">${S.serveur && S.serveur.url && S.serveur.cle ? 'activé' : 'non configuré'}</span></h2><p class="small muted" style="margin:0 0 8px">Quand tu déclares une absence ici, Cockpit envoie les créneaux à l'appli en ligne, qui prévient <b>automatiquement par mail</b> les collègues pouvant en prendre un (une seule fois par absence) ; elles se positionnent ensuite dans l'appli. Il faut l'adresse de l'appli en ligne et la clé qui t'a été donnée à son installation (elle reste sur ce Mac).</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="srv-url" type="text" placeholder="Adresse de l'appli en ligne (https://…)" value="${esc((S.serveur || {}).url || '')}" style="flex:2;min-width:240px"><input id="srv-cle" type="password" placeholder="Clé" value="${esc((S.serveur || {}).cle || '')}" style="flex:1;min-width:140px"><button class="btn" onclick="serveurEnregistrer()">Enregistrer et vérifier</button><button class="btn" onclick="serveurEnregistrer().then(ok => ok && publierAuto(true))">Tester l'envoi</button></div><div id="srv-etat" class="small muted" style="margin-top:6px">${S.serveur && S.serveur.url ? 'Adresse enregistrée : ' + esc(S.serveur.url) : ''}</div></div>
     <div class="card no-print" style="margin-top:14px"><h2>Appli en ligne pour l'équipe</h2><p class="small muted" style="margin:0 0 8px">Les AESH se positionnent sur leur téléphone (appli en ligne, dossier « remplacements-en-ligne »). <b>1.</b> Publier : par défaut le fichier ne contient que <b>la classe, l'horaire et la matière</b> (aucune donnée d'élève ne quitte ton poste ; tu transmets les consignes toi-même). Si tu coches la case ci-dessous, le prénom et les consignes pratiques sont aussi envoyés au serveur, jamais montrés dans la liste, et le prénom n'est communiqué que si tu le décides (effacés le lendemain du cours). <b>2.</b> Récupérer les prises : fichier téléchargé dans la rubrique « Coordination » de l'appli en ligne. Pour l'équipe, un créneau dont l'heure de début est passée ne peut plus être pris ni annulé ; toi seule peux encore le modifier dans l'onglet Coordination (inscrit au journal). En attendant, « Prévenir l'équipe » reste possible.</p><label class="small" style="display:block;margin:0 0 8px"><input type="checkbox" ${S.pubApercu ? 'checked' : ''} onchange="pubApercu(this.checked)"> Inclure aussi le prénom et les consignes pratiques (sinon aucune donnée d'élève n'est publiée)</label><button class="btn" onclick="exporterACouvrir()">Publier vers l'appli en ligne (fichier)</button> <label class="btn" style="cursor:pointer">Récupérer les prises<input type="file" accept=".json" style="display:none" onchange="importerPrises(event)"></label></div>`;
@@ -1075,12 +1218,15 @@ function pageDispositifs() {
 
 /* ====================== ROUTER ====================== */
 const routes = {
-  questions: pageQuestions, evals: pageEvals, ess: pageEss, absences: pageAbsences, synthese: pageSynthese, planning: pagePlanning, classes: pageClasses, eleves: pageEleves, aesh: pageAesh,
+  questions: pageQuestions, evals: pageEvals, ess: pageEss, conseils: pageConseils, absences: pageAbsences, synthese: pageSynthese, planning: pagePlanning, classes: pageClasses, eleves: pageEleves, aesh: pageAesh,
   affectation: pageAffectation, dossiers: pageDossiers, archives: pageArchives, bibliotheque: pageBibliotheque, parametres: pageParametres, reperes: pageReperes, pps: pagePPS, 'synthese-aesh': pageSyntheseAesh, alertes: pageAlertes, dispositifs: pageDispositifs
 };
 const view = { planning: 'classe', planningSite: '', elevesFilter: {}, sort: 'classe', aeshSite: '', classeSite: '', aeshFicheType: '', semaine: '', alerteCat: '' };
 window.toggleMenu = v => document.body.classList.toggle('menu-open', typeof v === 'boolean' ? v : !document.body.classList.contains('menu-open'));
+window.addEventListener('hashchange', () => { try { localStorage.setItem('cockpit-derniere-page', JSON.stringify({ h: location.hash, t: Date.now() })); } catch (e) { } });
+let premierRendu = true;
 function render() {
+  if (premierRendu) { premierRendu = false; if (!location.hash) { try { const d = JSON.parse(localStorage.getItem('cockpit-derniere-page') || 'null'); if (d && d.h && /^#\/[a-z]/.test(d.h) && Date.now() - d.t < 12 * 3600 * 1000) history.replaceState(null, '', d.h); } catch (e) { } } }
   const hash = location.hash || '#/synthese';
   const [, name, id] = hash.split('/');
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#/' + name));
@@ -1153,7 +1299,7 @@ function weekGrid(blocks, big = false, onclickFn = 'editCreneau', conflictIds = 
 }
 const crBlock = (cr, mode) => { const e = eleve(cr.eleveId), a = aesh(cr.aeshId); if (!e || !a) return null; const g = cr.groupe ? ` (${cr.groupe})` : ''; const r = mode === 'aesh' && cr.remplacantId ? aesh(cr.remplacantId) : null; const rSuffix = r ? ` → remplacé par ${r.nom}` : ''; return { id: cr.id, jour: cr.jour, debut: cr.debut, fin: cr.fin, groupe: cr.groupe, remplace: !!r, c: classeColor(e.classe), title: `${e.nom} ${e.prenom} (${e.classe}${libDisp(e) ? ', ' + libDisp(e) : ''})${g} · ${a.nom} · ${cr.debut}-${cr.fin}${rSuffix}`, sub: [cr.matiere, cr.salle].filter(Boolean).join(' · '), label: (mode === 'aesh' ? `${e.prenom} ${e.classe}` : mode === 'eleve' ? a.nom : `${ini(a)} · ${e.prenom}`) + g + (r ? ` ↪${ini(r)}` : '') }; };
 function pagePlanning() {
-  setTitle('Planning');
+  setTitle('EDT');
   const classesUtiles = [...new Set(S.creneaux.map(x => eleve(x.eleveId)?.classe).filter(Boolean))].sort();
   const legend = `<div class="legend">${classesUtiles.map(nom => `<span style="white-space:nowrap"><span class="dot" style="background:${classeColor(nom)}"></span>${esc(nom)}</span>`).join('') || '<span class="muted small">Couleur = classe de l\'élève</span>'}</div>`;
   const seg = `<div class="toolbar"><div class="seg">${['classe', 'aesh', 'eleve'].map(m => `<button class="${view.planning === m ? 'on' : ''}" onclick="setView('planning','${m}')">Par ${m === 'aesh' ? 'AESH' : m === 'eleve' ? 'élève' : m}</button>`).join('')}</div>
@@ -1698,15 +1844,34 @@ window.confirmerTout = () => { S.affectations.forEach(a => { if (a.aConfirmer &&
 
 /* ====================== DOSSIERS ====================== */
 function pageDossiers() {
-  setTitle('PPS / MOPPS');
+  setTitle('GEVASCO / MOPPS / PPS');
   const g = stats(S.eleves);
-  $('#page').innerHTML = `<div class="print-title">PPS / MOPPS en cours</div><div class="toolbar"><span class="muted small">${g.pending} dossier${g.pending > 1 ? 's' : ''} en cours · ${hf(g.prev)} prévisionnelles. Consultation seule : le statut d'un dossier se modifie depuis la fiche de l'élève.</span></div>
-  <div class="kanban">${KANBAN.map(st => { const list = sortEleves(S.eleves.filter(e => isActive(e) && e.statut === st));
-    return `<div class="kcol"><h3>${esc(st)}<span class="pill neutral">${list.length}</span></h3>${list.map(e => { let renouv = '';
-      if (st.startsWith('Dossier renouvellement déposé') && e.notifFin) { const d = new Date(e.notifFin); d.setMonth(d.getMonth() - 9); renouv = `<div class="small" style="margin-top:4px;color:var(--bad);font-weight:600">À renouveler avant le ${d.toLocaleDateString('fr-FR')}</div>`; }
-      if (e.depotDate) renouv += `<div class="small muted" style="margin-top:4px">Déposé le ${frDate(e.depotDate)}</div>`;
-      if (e.notifFin) renouv += `<div class="small" style="margin-top:4px">${pastilleValidite(e, true)} <span class="muted">notif. jusqu'au ${frDate(e.notifFin)}</span></div>`;
-      return `<div class="kcard"><b><a href="#/eleves/${e.id}" style="text-decoration:none;color:inherit">${esc(e.nom)} ${esc(e.prenom)}</a></b><span class="small muted">${esc(e.classe)} · <span class="pill ${e.type === 'Individuel' ? 'indiv' : 'mutu'}">${e.type}</span>${e.heuresPrev ? ' · prévu ' + hf(e.heuresPrev) : ''}</span>${renouv}${e.remarques ? `<div class="small" style="margin-top:4px">${esc(e.remarques)}</div>` : ''}</div>`; }).join('') || '<div class="muted small">—</div>'}</div>`; }).join('')}</div>`;
+  // ordre voulu par Cécile : en cours de validité, renouvellements (AESHi puis AESHm), premières demandes (AESHi puis AESHm), puis dossiers à monter et vigilance
+  const SECTIONS = [
+    { st: 'Notifié', titre: 'GEVASCO / MOPPS / PPS en cours de validité', coul: 'var(--ok)', valide: true },
+    { st: 'Dossier renouvellement déposé AESHi', titre: 'Dossiers de renouvellement déposés · AESHi', coul: 'var(--indiv)' },
+    { st: 'Dossier renouvellement déposé AESHm', titre: 'Dossiers de renouvellement déposés · AESHm', coul: 'var(--mutu)' },
+    { st: 'Dossier 1ère demande déposé AESHi', titre: 'Dossiers de première demande déposés · AESHi', coul: 'var(--indiv)' },
+    { st: 'Dossier 1ère demande déposé AESHm', titre: 'Dossiers de première demande déposés · AESHm', coul: 'var(--mutu)' },
+    { st: 'Dossier à monter', titre: 'Dossiers à monter', coul: 'var(--warn)', fin: true },
+    { st: 'Vigilance (sans dossier)', titre: 'Vigilance (sans dossier)', coul: 'var(--muted)', fin: true }];
+  const moinsNeuf = iso => { const d = new Date(iso + 'T12:00:00'); d.setMonth(d.getMonth() - 9); return d; };
+  const urgent = e => e.notifFin && (new Date(e.notifFin + 'T12:00:00') - Date.now()) / 864e5 < 270;
+  const docsCell = e => { const L = [['MOPPS', 'MOPPS'], ['PPS', 'PPS'], ['GEVASCO', 'GEVASCO']].filter(([t]) => docsDeType(e, t).length).map(([t, l]) => lienDoc(e, t, l)); return `<td class="small" style="white-space:nowrap">${L.join(' · ') || '<span class="muted">—</span>'}</td>`; };
+  const typePill = e => `<span class="pill ${e.type === 'Individuel' ? 'indiv' : 'mutu'}">${e.type}</span>`;
+  const nomCell = e => `<td><a href="#/eleves/${e.id}" style="color:inherit"><b>${esc(e.nom)}</b> ${esc(e.prenom)}</a></td><td class="small">${classeHtml(e)}</td>`;
+  const renouvCell = (e, depose) => e.notifFin ? `<td class="small" style="${urgent(e) ? 'color:var(--bad);font-weight:600' : ''}">${moinsNeuf(e.notifFin).toLocaleDateString('fr-FR')}${urgent(e) && !depose ? '<div>à renouveler</div>' : ''}</td>` : '<td class="small muted">—</td>';
+  const bloc = s => { let L = S.eleves.filter(e => isActive(e) && e.statut === s.st);
+    L = s.valide ? L.sort((a, b) => (a.notifFin || '9999').localeCompare(b.notifFin || '9999') || a.nom.localeCompare(b.nom, 'fr')) : sortEleves(L);
+    const tete = s.valide ? '<tr><th>Élève</th><th>Classe</th><th>Type</th><th class="num">Heures notifiées</th><th>Validité de la notification</th><th>À renouveler avant le</th><th>Documents</th></tr>'
+      : '<tr><th>Élève</th><th>Classe</th><th>Type</th><th class="num">Heures prévues</th><th>Déposé le</th><th>Notification actuelle jusqu\'au</th><th>À renouveler avant le</th><th>Documents</th><th>Remarques</th></tr>';
+    const lignes = L.map(e => s.valide
+      ? `<tr class="${urgent(e) ? 'doss-urgent' : ''}">${nomCell(e)}<td>${typePill(e)}</td><td class="num">${e.heures == null ? '—' : hf(e.heures)}</td><td class="small">${e.notifDebut ? frDate(e.notifDebut) + ' → ' : ''}${e.notifFin ? '<b>' + frDate(e.notifFin) + '</b>' : '<span class="muted">date de fin ?</span>'} ${pastilleValidite(e, true)}</td>${renouvCell(e)}${docsCell(e)}</tr>`
+      : `<tr>${nomCell(e)}<td>${typePill(e)}</td><td class="num">${e.heuresPrev ? hf(e.heuresPrev) : '<span class="muted">—</span>'}</td><td class="small">${e.depotDate ? frDate(e.depotDate) : '<span class="muted">—</span>'}</td><td class="small">${e.notifFin ? frDate(e.notifFin) + ' ' + pastilleValidite(e, true) : '<span class="muted">—</span>'}</td>${renouvCell(e, true)}${docsCell(e)}<td class="small">${esc(e.remarques || '')}</td></tr>`).join('');
+    return `<div class="card doss-bloc" id="doss-${KANBAN.indexOf(s.st) + 1}" style="border-left:4px solid ${s.coul}"><h2 style="margin:0 0 6px">${esc(s.titre)} <span class="pill ${L.length ? 'neutral' : 'ok'}">${L.length}</span></h2>${L.length ? `<div class="tscroll"><table class="t compact">${'<thead>' + tete + '</thead>'}<tbody>${lignes}</tbody></table></div>` : '<div class="small muted">Aucun élève.</div>'}</div>`; };
+  const resume = SECTIONS.map(s => { const n = S.eleves.filter(e => isActive(e) && e.statut === s.st).length; return `<a class="doss-chip" href="javascript:void(0)" onclick="document.getElementById('doss-${KANBAN.indexOf(s.st) + 1}').scrollIntoView({behavior:'smooth'})" style="border-left-color:${s.coul}"><b>${n}</b> ${esc(s.titre)}</a>`; }).join('');
+  $('#page').innerHTML = `<div class="print-title">GEVASCO / MOPPS / PPS</div><div class="toolbar"><span class="muted small">${g.pending} dossier${g.pending > 1 ? 's' : ''} en cours · ${hf(g.prev)} prévisionnelles. Consultation seule : le statut d'un dossier se modifie depuis la fiche de l'élève. En rouge : notification qui se termine dans moins de 9 mois (dossier à renouveler).</span></div>
+  <div class="doss-chips no-print">${resume}</div>${SECTIONS.map(bloc).join('')}`;
 }
 window.setStatut = (id, st) => { const e = eleve(id); const old = e.statut; e.statut = st; commit('dossier', `${e.nom} ${e.prenom} : ${old} → ${st}`); };
 window.notifier = id => { const e = eleve(id); const t = e.statut.includes('AESHi') ? 'Individuel' : e.statut.includes('AESHm') ? 'Mutualisé' : e.type;
@@ -1749,7 +1914,7 @@ function pageParametres() {
     <h2 style="margin-top:18px">Sauvegarde JSON</h2><p class="small muted">Le JSON contient tout (élèves, AESH, affectations, créneaux, journal). C'est ta sauvegarde de référence : exporte-le après chaque séance de travail et garde-le dans un dossier sûr.</p>
     <div class="toolbar"><button class="btn primary" onclick="exportJSON()">Exporter JSON</button><label class="btn">Importer JSON<input type="file" accept=".json" class="sr" onchange="importJSON(this.files[0])"></label></div>
     <h2 style="margin-top:18px">Mise à jour préparée</h2><p class="small muted">Fichier préparé par Claude (emplois du temps AESH lus sur les EDT papier, dates de notification…) : tu vérifies les correspondances et les changements avant qu'ils soient enregistrés.</p>
-    <div class="toolbar"><label class="btn">Importer une mise à jour (EDT, fiches élèves)<input type="file" accept=".json" class="sr" onchange="importEdtAesh(this.files[0]);this.value=''"></label><button class="btn" onclick="annulerEdtAesh()">Annuler la dernière mise à jour</button></div>
+    <div class="toolbar"><label class="btn">Importer une mise à jour (EDT, fiches élèves, conseils de classe)<input type="file" accept=".json" class="sr" onchange="importEdtAesh(this.files[0]);this.value=''"></label><button class="btn" onclick="annulerEdtAesh()">Annuler la dernière mise à jour</button></div>
     <h2 style="margin-top:18px">Excel / CSV</h2><p class="small muted">Excel = 4 onglets (Élèves, AESH, Affectation, Créneaux). Nécessite une connexion la première fois (librairie chargée à la volée) ; sinon le CSV fonctionne hors ligne.</p>
     <div class="toolbar"><button class="btn" onclick="exportExcel()">Exporter Excel</button><button class="btn" onclick="exportCSV()">Exporter CSV (élèves)</button></div>
     <h2 style="margin-top:18px">Word</h2><p class="small muted">Documents .doc ouvrables dans Word / LibreOffice : liste des élèves, fiche élève (depuis sa page), fiche AESH (depuis sa page), synthèse.</p>
@@ -1801,7 +1966,7 @@ const trouverEleve = (nom, classe) => { const m = motsDe(nom); if (!m.length) re
 const heuresCreneaux = L => L.reduce((t, c) => t + (c.groupe ? 0.5 : 1) * Math.max(0.5, Math.round((t2m(c.fin) - t2m(c.debut)) / 30) * 0.5), 0);
 let EDT_IMPORT = null;
 window.importEdtAesh = file => { if (!file) return; const r = new FileReader(); r.onload = () => {
-  let d; try { d = JSON.parse(r.result); if (d.type !== 'edt-aesh' || (!Array.isArray(d.edt) && !Array.isArray(d.eleves))) throw 0; d.edt = d.edt || []; d.eleves = d.eleves || []; } catch { alert("Ce fichier n'est pas un fichier d'emplois du temps AESH."); return; }
+  let d; try { d = JSON.parse(r.result); if (d.type !== 'edt-aesh' || (!Array.isArray(d.edt) && !Array.isArray(d.eleves) && !Array.isArray(d.conseils))) throw 0; d.edt = d.edt || []; d.eleves = d.eleves || []; } catch { alert("Ce fichier n'est pas un fichier d'emplois du temps AESH."); return; }
   EDT_IMPORT = d;
   const optA = (sel) => `<option value="">— choisir —</option>` + sortAesh(S.aesh).map(a => `<option value="${a.id}" ${sel === a.id ? 'selected' : ''}>${esc(a.nom)}</option>`).join('');
   const optE = (sel) => `<option value="">— choisir —</option>` + sortEleves(S.eleves).map(e => `<option value="${e.id}" ${sel === e.id ? 'selected' : ''}>${esc(e.nom)} ${esc(e.prenom)} — ${esc(e.classe)}${e.archive ? ' (archivé)' : ''}</option>`).join('');
@@ -1817,7 +1982,8 @@ window.importEdtAesh = file => { if (!file) return; const r = new FileReader(); 
   const valTxt = (k, v) => v == null || v === '' ? '—' : /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? frDate(v) : k === 'heures' ? hf(v) : esc(v);
   const blocsE = d.eleves.length ? `<div class="card" style="margin:10px 0"><h3 style="margin:0 0 6px">Fiches élèves</h3><table class="t compact"><thead><tr><th>Dans le fichier</th><th>Élève dans le cockpit</th><th>Changements</th></tr></thead><tbody>${d.eleves.map((x, i) => { const ce = trouverEleve(x.eleve, x.classe); const e0 = ce.length === 1 ? ce[0] : null;
       return `<tr><td><b>${esc(x.eleve)}</b>${x.note ? `<div class="small muted">${esc(x.note)}</div>` : ''}</td><td><select name="fe${i}">${optE(e0 ? e0.id : '')}</select>${e0 ? '' : `<div class="small" style="color:var(--warn)">${ce.length ? 'plusieurs élèves possibles' : 'élève non trouvé'} : choisis-le</div>`}</td><td class="small">${Object.entries(x.champs || {}).map(([k, v]) => `<label style="display:block"><input type="checkbox" name="fc${i}_${k}" checked> ${esc(LIB_CHAMPS[k] || k)} : ${e0 ? valTxt(k, e0[k]) + ' → ' : ''}<b>${valTxt(k, v)}</b></label>`).join('')}</td></tr>`; }).join('')}</tbody></table></div>` : '';
-  modal(`<h2>Importer une mise à jour préparée</h2><p class="small muted" style="margin:0 0 6px">Fichier : ${esc(file.name)}${d.source ? ' · ' + esc(d.source) : ''}. Vérifie les correspondances puis Enregistrer : les créneaux de chaque AESH ci-dessous sont remplacés par ceux du fichier (un créneau inchangé garde ses remplacements en cours) et ses heures par élève sont mises à jour. Les fiches élèves listées reçoivent les nouvelles valeurs cochées (le statut du dossier est recalculé d'après la date de fin de notification). Une copie de sauvegarde est gardée : bouton « Annuler la dernière mise à jour » dans Données & exports.</p>${blocsE}${blocs}
+  const blocsC = Array.isArray(d.conseils) && d.conseils.length ? (() => { const exist = (S.conseils || []).filter(c => c.periode === d.periode); return `<div class="card" style="margin:10px 0"><h3 style="margin:0 0 6px">Conseils de classe${d.periode ? ' · ' + esc(d.periode) : ''} <span class="small muted">${d.conseils.length} conseil${d.conseils.length > 1 ? 's' : ''}</span></h3>${exist.length ? `<p class="small" style="margin:0 0 6px;color:var(--warn)">Les ${exist.length} conseils déjà enregistrés pour cette période sont remplacés par ceux du fichier.</p>` : ''}<table class="t compact"><thead><tr><th>Date</th><th>Heure</th><th>Classe</th><th>Salle</th><th>Présidé par</th></tr></thead><tbody>${d.conseils.slice().sort(ccTri).map(c => `<tr><td>${jourDe(c.date)} ${frDate(c.date)}</td><td>${heureTxt(c.heure)}</td><td><b>${esc(c.classe)}</b> ${esc(c.precision || '')}</td><td>${esc(c.salle || '')}</td><td>${esc(c.preside || '')}</td></tr>`).join('')}</tbody></table></div>`; })() : '';
+  modal(`<h2>Importer une mise à jour préparée</h2><p class="small muted" style="margin:0 0 6px">Fichier : ${esc(file.name)}${d.source ? ' · ' + esc(d.source) : ''}. Vérifie les correspondances puis Enregistrer : les créneaux de chaque AESH ci-dessous sont remplacés par ceux du fichier (un créneau inchangé garde ses remplacements en cours) et ses heures par élève sont mises à jour. Les fiches élèves listées reçoivent les nouvelles valeurs cochées (le statut du dossier est recalculé d'après la date de fin de notification). Une copie de sauvegarde est gardée : bouton « Annuler la dernière mise à jour » dans Données & exports.</p>${blocsC}${blocsE}${blocs}
     ${d.edt.length ? '' : '<span hidden>'}<label class="small" style="display:block;margin-top:6px"><input type="checkbox" name="retirer" checked> Retirer l'AESH des élèves qu'elle suivait et qui ne sont plus dans son nouvel EDT</label>${d.edt.length ? '' : '</span>'}`, f => appliquerEdtAesh(f));
 }; r.readAsText(file); };
 function appliquerEdtAesh(f) {
@@ -1847,6 +2013,7 @@ function appliquerEdtAesh(f) {
     if (ch.length && x.champs && x.champs.notifFin && !x.champs.statut && e.statutManuel && isPending(e)) e.statutManuel = false;
     if (ch.length) { log('eleve', `${e.nom} ${e.prenom} : ${ch.join(', ')} (mise à jour préparée)`); resume.push(`${e.nom} ${e.prenom} : ${ch.length} champ${ch.length > 1 ? 's' : ''} mis à jour`); } });
   if (d.eleves.length) appliquerStatuts();
+  if (Array.isArray(d.conseils) && d.conseils.length) { S.conseils = (S.conseils || []).filter(c => c.periode !== d.periode).concat(d.conseils.map(c => ({ id: c.id || uid('cc'), date: c.date, heure: c.heure || '', classe: c.classe || '', precision: c.precision || '', salle: c.salle || '', preside: c.preside || '', periode: d.periode || c.periode || '', source: d.source || '' }))); resume.push(`${d.conseils.length} conseil${d.conseils.length > 1 ? 's' : ''} de classe enregistré${d.conseils.length > 1 ? 's' : ''}${d.periode ? ' (' + d.periode + ')' : ''}`); }
   EDT_IMPORT = null;
   commit('planning', `Mise à jour importée (${d.source || 'fichier'}) — ` + resume.join(' ; '));
   alert('Mise à jour enregistrée :\n\n' + (resume.join('\n') || 'aucun changement'));
@@ -2079,12 +2246,45 @@ function liensAbsence(ab) {
   return { arch: (S.archives || []).filter(r => r.aeshId === ab.aeshId && (r.absenceDebut || '') === d), segs: (S.segmentsRempl || []).filter(g => g.absentId === ab.aeshId && (g.absDebut || '') === d),
     prises: (S.prisesOcc || []).filter(p => p.absentId === ab.aeshId && p.date >= (ab.fin && ab.fin < d ? ab.fin : d) && p.date <= (ab.fin && ab.fin > d ? ab.fin : (ab.fin ? d : '9999-12-31'))) };
 }
-window.supprimerPriseOcc = occId => {
+window.supprimerPriseOcc = occId => window.retirerPriseOcc(occId);
+// la coordination garde la main : retirer un remplacement pris en ligne (la collègue ne vient pas) ou mettre quelqu'un d'autre
+const libPrise = p => `${frDate(p.date)} ${hh(p.debut)}–${hh(p.fin)}`;
+const numEleveCr = cr => { const e = cr && eleve(cr.eleveId), f = S.fiches || {}; return e && f.codes && f.codes[e.id] ? 'élève n° ' + f.codes[e.id] : ''; };
+async function libererEnLigne(p) {
+  if (p.parCoordination || !serveurOK()) return true;
+  try { await apiServeur('/api/admin/prises/retirer', { occId: p.occId }); return true; }
+  catch (x) { alert("Le créneau n'a pas pu être libéré dans l'appli de l'équipe : " + x.message + "\nVérifie internet et la Synchro, puis réessaie. Rien n'a été changé."); return false; }
+}
+window.retirerPriseOcc = async occId => {
   const p = (S.prisesOcc || []).find(x => x.occId === occId); if (!p) return;
   const r = aesh(p.remplacantId), ab = aesh(p.absentId);
-  if (!confirm(`Supprimer cette ligne ?\n${frDate(p.date)} ${hh(p.debut)}–${hh(p.fin)} — absence de ${ab ? ab.nom : '?'}, pris par ${r ? r.nom : '?'}.\n\nElle disparaît de Cockpit (compteurs et heures de remplacement comprises). Si la prise existe encore dans l'appli en ligne, elle n'y est pas supprimée.`)) return;
-  S.prisesOcc = S.prisesOcc.filter(x => x !== p); S.prisesVues = (S.prisesVues || []).filter(x => x !== occId);
-  commit('aesh', `Prise en ligne supprimée : ${frDate(p.date)} ${hh(p.debut)}–${hh(p.fin)}, ${ab ? ab.nom : '?'} remplacé.e par ${r ? r.nom : '?'}`);
+  if (!confirm(`Retirer ce remplacement ?\n${libPrise(p)} : ${r ? r.nom : '?'} ne remplace plus ${ab ? ab.nom : '?'}.\n\nLe créneau redevient libre dans l'appli de l'équipe (s'il n'a pas encore commencé) et sort des compteurs de ${r ? r.nom.split(' ')[0] : 'la collègue'}.`)) return;
+  if (!(await libererEnLigne(p))) return;
+  S.prisesOcc = S.prisesOcc.filter(x => x.occId !== occId); S.prisesVues = (S.prisesVues || []).filter(x => x !== occId);
+  commit('aesh', `Remplacement retiré par la coordination : ${libPrise(p)}, ${r ? r.nom : '?'} ne remplace plus ${ab ? ab.nom : '?'}`);
+  if (serveurOK()) publierAuto();
+  if (r && r.email && confirm(`Prévenir ${r.nom} par mail ?`)) location.href = `mailto:${r.email}?subject=${encodeURIComponent('Remplacement du ' + frDate(p.date) + ' annulé')}&body=${encodeURIComponent(`Bonjour ${r.nom.split(' ')[0]},\n\nTu n'as plus à assurer le remplacement du ${libPrise(p)}. Merci !\n\nCécile`)}`;
+};
+window.changerPriseOcc = occId => {
+  const p = (S.prisesOcc || []).find(x => x.occId === occId); if (!p) return;
+  const r = aesh(p.remplacantId), ab = aesh(p.absentId), cr = S.creneaux.find(c => c.id === p.creneauId);
+  const cands = (cr ? candidatsRemplacement(cr) : sortAesh(S.aesh.filter(a => !absente(a))).map(a => ({ id: a.id, label: a.nom }))).filter(c => c.id !== p.remplacantId);
+  modal(`<h2>Mettre quelqu'un d'autre</h2><p class="small muted" style="margin-top:0">${libPrise(p)} · absence de ${esc(ab ? ab.nom : '?')}. Aujourd'hui : <b>${esc(r ? r.nom : '?')}</b>.</p><div class="form-grid">
+    <label class="f wide">Nouvelle remplaçante<select name="aid" required><option value="">— choisir —</option>${cands.map(c => `<option value="${c.id}">${esc(c.label)}</option>`).join('')}</select></label>
+    <label class="f wide" style="flex-direction:row;gap:8px;align-items:center"><input type="checkbox" name="mail" checked style="width:auto"> Ouvrir un mail pour prévenir les deux collègues</label></div>
+    <p class="small muted">Le créneau sort de l'appli de l'équipe : plus personne ne peut le prendre en ligne.</p>`, d => {
+    if (!d.aid) { alert('Choisis la nouvelle remplaçante.'); return false; }
+    (async () => {
+      if (!(await libererEnLigne(p))) return;
+      const n = aesh(d.aid), i = S.prisesOcc.findIndex(x => x.occId === occId);
+      const rec = { occId, creneauId: p.creneauId, absentId: p.absentId, date: p.date, debut: p.debut, fin: p.fin, remplacantId: d.aid, priseLe: maintenantLocal(), parCoordination: true };
+      if (i >= 0) S.prisesOcc[i] = rec; else S.prisesOcc.push(rec);
+      commit('aesh', `Remplacement modifié par la coordination : ${libPrise(p)}, ${n ? n.nom : '?'} à la place de ${r ? r.nom : '?'} (absence de ${ab ? ab.nom : '?'})`);
+      if (serveurOK()) publierAuto();
+      if (d.mail && n) { const to = [n.email, r && r.email].filter(Boolean).join(','), num = numEleveCr(cr), mat = cr ? sansNomEleve(cr.matiere) : '';
+        location.href = `mailto:${to}?subject=${encodeURIComponent('Changement de remplacement le ' + frDate(p.date))}&body=${encodeURIComponent(`Bonjour,\n\nChangement pour le remplacement du ${libPrise(p)}${mat ? ' (' + mat + ')' : ''}${num ? ', ' + num : ''} :\n- ${n.nom.split(' ')[0]} assure ce créneau,\n- ${r ? r.nom.split(' ')[0] : ''} n'y va plus.\n\nMerci à vous deux !\n\nCécile`)}`; }
+    })();
+  });
 };
 window.modifierAbsence = id => {
   const ab = (S.absences || []).find(x => x.id === id); if (!ab || ab.ouvert) return;
@@ -2127,12 +2327,12 @@ function modal(html, onSave, onDelete) {
 window.closeModal = () => { $('#modal').innerHTML = ''; document.onkeydown = null; };
 
 /* ====================== INIT ====================== */
-load(); { const nd = appliquerDossiers() + appliquerEss() + appliquerStatuts(); if (nd) { log('eleve', 'Fiches élèves mises à jour d\'après les documents (PPS, MOPPS, notifications, GEVASCO…)'); save(); } } chargerDossiers(); if (synchroDispositifs()) { log('affectation', 'Élèves ULIS / SEGPA rattachés automatiquement aux AESH de leur dispositif'); save(); } render(); verifierRetours(); essVerifierRappel(); setInterval(essVerifierRappel, 60000);
+load(); { const nd = appliquerDossiers() + appliquerEss() + appliquerStatuts(); if (nd) { log('eleve', 'Fiches élèves mises à jour d\'après les documents (PPS, MOPPS, notifications, GEVASCO…)'); save(); } } chargerDossiers(); if (synchroDispositifs()) { log('affectation', 'Élèves ULIS / SEGPA rattachés automatiquement aux AESH de leur dispositif'); save(); } render(); verifierRetours(); essVerifierRappel(); setInterval(essVerifierRappel, 60000); ccVerifierRappel(); setInterval(ccVerifierRappel, 60000);
 setInterval(verifierRetours, 3600 * 1000); evalsActualiser(true); prisesActualiser(true); setInterval(() => { evalsActualiser(true); prisesActualiser(true); }, 120000); setTimeout(() => { if (serveurOK()) publierAuto(); }, 4000); setInterval(() => { if (serveurOK() && S.pubJour !== aujourdhui()) publierAuto(); }, 600000); document.addEventListener('visibilitychange', () => { if (!document.hidden) { verifierRetours(); chargerDossiers(); } });
 // Un clic sur « Synthèse » actualise toute l'application : relecture des fichiers de données (nouvelle version éventuelle) puis recalcul de toutes les pages. Les saisies sont déjà enregistrées, rien n'est perdu.
 const lienSynthese = document.querySelector('#nav a[href="#/synthese"]');
 if (lienSynthese) lienSynthese.addEventListener('click', ev => { ev.preventDefault(); try { sessionStorage.setItem('cockpit-actualise', '1'); } catch (e) { } location.hash = '#/synthese'; location.reload(); });
 try { if (sessionStorage.getItem('cockpit-actualise')) { sessionStorage.removeItem('cockpit-actualise'); setTimeout(() => toast('Application actualisée'), 300); } } catch (e) { }
 if (window.__dataJustRefreshed) { save(); setTimeout(() => toast('Données mises à jour automatiquement'), 300); }
-window.PAS = { get state() { return S; }, save, render, quinzaineDe, dureeUnique, chevauchements };
+window.PAS = { get state() { return S; }, save, render, quinzaineDe, dureeUnique, chevauchements, apercu: apercuEleve, libDisp, sansNomEleve, ppsSummary };
 })();
