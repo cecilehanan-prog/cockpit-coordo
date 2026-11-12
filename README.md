@@ -1,32 +1,36 @@
 # Cockpit Coordo
 
-Le cockpit de suivi AESH, en appli installable sur le téléphone et l'ordinateur.
+Le cockpit de suivi AESH. **Ce dépôt sert de sauvegarde du code.**
 
-👉 **Ouvrir l'appli :** https://cecilehanan-prog.github.io/cockpit-coordo/
+👉 **Ouvrir l'appli :** https://cockpit-coordo.netlify.app/
+👉 **Fiches élèves AESH (NFC / QR) :** https://fiches-eleves.netlify.app/
 
-Sur le téléphone : ouvre le lien, puis « Ajouter à l'écran d'accueil ».
+L'ancienne adresse https://cecilehanan-prog.github.io/cockpit-coordo/ renvoie automatiquement vers Netlify
+(et retire l'ancienne appli installée depuis github.io, pour qu'elle ne reste pas en cache).
+
+## Ce qu'il y a dans le dépôt
+
+| Dossier | Contenu |
+|---|---|
+| `en-ligne/` | L'appli en ligne, telle qu'elle est déposée sur Netlify (site cockpit-coordo). |
+| `mac/` | Le code de l'appli Mac (à copier dans iCloud › COORDO AESH › Documents › pas). |
+| racine | Les pages de redirection servies par GitHub Pages. |
 
 ## Les données ne sont pas ici
 
-Ce dépôt est public : il ne contient **aucune donnée d'élève ni d'AESH**, seulement le code de l'appli.
-La première fois, l'appli est vide. Dans **Données & exports › Importer JSON**, charge le JSON exporté depuis
-l'appli du Mac. Les données restent dans le navigateur de l'appareil, jamais sur GitHub.
+Ce dépôt est public : il ne contient **aucune donnée d'élève ni d'AESH**, seulement le code.
 
-## Mettre à jour l'appli en ligne
-
-La source reste le dossier « pas » sur iCloud (celui qu'ouvre l'appli Mac). Après une modification :
-
-```sh
-python3 outils/publier.py "<chemin du dossier pas>"
-```
-
-Le script recopie le code et remplace tous les fichiers de données par des fichiers vides,
-puis on enregistre (commit) et on envoie (push). Les fonctions propres au Mac (lecture des dossiers
-« Aménagements / Notifications » et « EDT AESH ») ne fonctionnent que dans l'appli Mac.
+- Dans `en-ligne/js/`, les fichiers de données (`data.js`, `pial-donnees.js`, `ess-donnees.js`,
+  `dossiers-*.js`, `mopps-items.js`) sont vides. Les données arrivent par la synchro chiffrée
+  ou par « Données & exports › Importer JSON » et restent sur l'appareil.
+- Dans `mac/`, seuls les 8 fichiers de code sont sauvegardés. Les fichiers de données du dossier « pas »
+  et le dossier « EDT AESH » restent sur le Mac. Dans `mac/js/app.js`, les questions pré-remplies
+  (qui citaient des élèves) sont retirées : **ne pas recopier ce fichier par-dessus celui du Mac.**
+  Pour mettre le Mac à jour, utiliser le zip livré dans le projet.
 
 ## Synchronisation chiffrée (Mac, iPad, iPhone)
 
 `js/sync.js` chiffre toutes les données sur l'appareil (AES-GCM, clé tirée d'une phrase secrète) avant
-de les envoyer dans l'espace Firebase privé de Cécile. Firebase ne stocke qu'un bloc illisible.
-Elle s'active quand `js/sync-config.js` contient les identifiants (publics) du projet Firebase.
-Dans l'appli : menu de gauche › « Synchro », avec l'e-mail et le mot de passe Firebase et la phrase secrète.
+de les envoyer dans le projet Firebase « cockpit-coordo ». Firebase ne stocke qu'un bloc illisible.
+`js/sync-config.js` contient les identifiants **publics** de ce projet Firebase : ce n'est pas un secret,
+la sécurité vient des règles Firestore et de la phrase secrète.

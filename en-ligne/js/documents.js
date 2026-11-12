@@ -66,7 +66,7 @@
         else if (reste.length === 1) { if (reste !== P[0]) continue; dP = 0; bonus = 2; }
         else if (P.startsWith(reste) || reste.startsWith(P)) { dP = 0; bonus = 6; }
         else if (reste.length >= 3 && reste[0] === P[0] && lev(reste, P.slice(0, reste.length)) <= 1) { dP = 1; bonus = 3; } // diminutif : « Anto » ≈ « Anthony »
-        else if (reste.length >= 4 && P.includes(reste)) { dP = 1; bonus = 2; } // prénom composé : « David » pour « Ghis-David »
+        else if (reste.length >= 4 && P.includes(reste)) { dP = 1; bonus = 2; } // prénom composé : « Marie » pour « Anne-Marie »
         else { dP = lev(reste, P); if (dP > (P.length >= 5 ? 1 : 0)) continue; bonus = 3; }
         const sc = 100 - 12 * dN - 6 * dP + bonus - Math.abs(dl);
         if (!meilleur || sc > meilleur) meilleur = sc;

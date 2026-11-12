@@ -19,7 +19,9 @@ h3{font-size:13px;font-weight:650;margin:0 0 6px;color:var(--muted)}
 
 /* ---------- shell ---------- */
 #app{display:grid;grid-template-columns:var(--sidebar) 1fr;height:100vh;overflow:hidden}
-.sidebar{background:#256782;color:#DCE3F0;display:flex;flex-direction:column;padding:18px 14px;gap:4px;position:relative;overflow:hidden}
+.sidebar{background:#256782;color:#DCE3F0;display:flex;flex-direction:column;padding:18px 14px;gap:4px;position:relative;overflow:hidden;overflow-y:auto;min-height:0;-webkit-overflow-scrolling:touch}
+.sidebar::before{position:fixed;width:var(--sidebar)}
+.sidebar>*{flex-shrink:0}
 .sidebar::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.07;background-image:url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNDAiIGhlaWdodD0iMjYwIiB2aWV3Qm94PSIwIDAgMTQwIDI2MCI+CiAgPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkZGRkZGIiBzdHJva2Utd2lkdGg9IjEuNiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIj4KICAgIDxwYXRoIGQ9Ik00NSwyNTUgQzIwLDI0OCAxNSwyMjUgMzIsMjE1IEM0OCwyMDYgNjIsMjE4IDU1LDIzMCBDNTAsMjM4IDM4LDIzNSA0MCwyMjYiIC8+CiAgICA8cGF0aCBkPSJNNDUsMjIyIEMyNSwxOTAgNjUsMTY1IDQ4LDEzMCBDMzUsMTAwIDY4LDg1IDU1LDUwIEM0OCwzMCA2OCwyMCA2MCw1IiAvPgogICAgPHBhdGggZD0iTTU1LDE1MCBDNzUsMTQ1IDg1LDEzMCA3OCwxMTUiIC8+CiAgICA8cGF0aCBkPSJNNTAsOTAgQzMwLDg1IDIyLDY4IDMyLDU1IiAvPgogIDwvZz4KICA8ZyBmaWxsPSIjRkZGRkZGIiBzdHJva2U9Im5vbmUiPgogICAgPHBhdGggZD0iTTAsMCBDLTQsLTEwIC0zLC0yMCAwLC0yNiBDMywtMjAgNCwtMTAgMCwwIFoiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDQ4LDIwMCkgcm90YXRlKC0zMCkiIC8+CiAgICA8cGF0aCBkPSJNMCwwIEMtNCwtMTAgLTMsLTIwIDAsLTI2IEMzLC0yMCA0LC0xMCAwLDAgWiIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNzgsMTE1KSByb3RhdGUoNjApIiAvPgogICAgPHBhdGggZD0iTTAsMCBDLTQsLTEwIC0zLC0yMCAwLC0yNiBDMywtMjAgNCwtMTAgMCwwIFoiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDYwLDE0MCkgcm90YXRlKC0xMDApIiAvPgogICAgPHBhdGggZD0iTTAsMCBDLTQsLTEwIC0zLC0yMCAwLC0yNiBDMywtMjAgNCwtMTAgMCwwIFoiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDMyLDU1KSByb3RhdGUoLTE1MCkiIC8+CiAgICA8cGF0aCBkPSJNMCwwIEMtNCwtMTAgLTMsLTIwIDAsLTI2IEMzLC0yMCA0LC0xMCAwLDAgWiIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNTAsOTApIHJvdGF0ZSgxNDApIiAvPgogICAgPHBhdGggZD0iTTAsMCBDLTQsLTEwIC0zLC0yMCAwLC0yNiBDMywtMjAgNCwtMTAgMCwwIFoiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDU1LDUwKSByb3RhdGUoLTQwKSIgLz4KICA8L2c+CiAgPGcgZmlsbD0iI0ZGRkZGRiIgc3Ryb2tlPSJub25lIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSg2MCw1KSI+CiAgICA8ZWxsaXBzZSBjeD0iMCIgY3k9Ii02IiByeD0iMi4yIiByeT0iNC4yIiAvPgogICAgPGVsbGlwc2UgY3g9IjAiIGN5PSItNiIgcng9IjIuMiIgcnk9IjQuMiIgdHJhbnNmb3JtPSJyb3RhdGUoNzIpIiAvPgogICAgPGVsbGlwc2UgY3g9IjAiIGN5PSItNiIgcng9IjIuMiIgcnk9IjQuMiIgdHJhbnNmb3JtPSJyb3RhdGUoMTQ0KSIgLz4KICAgIDxlbGxpcHNlIGN4PSIwIiBjeT0iLTYiIHJ4PSIyLjIiIHJ5PSI0LjIiIHRyYW5zZm9ybT0icm90YXRlKDIxNikiIC8+CiAgICA8ZWxsaXBzZSBjeD0iMCIgY3k9Ii02IiByeD0iMi4yIiByeT0iNC4yIiB0cmFuc2Zvcm09InJvdGF0ZSgyODgpIiAvPgogICAgPGNpcmNsZSBjeD0iMCIgY3k9IjAiIHI9IjEuOCIgLz4KICA8L2c+Cjwvc3ZnPgo=");background-repeat:no-repeat;background-position:center center;background-size:auto 100%}
 .sidebar>*{position:relative;z-index:1}
 .brand{font-weight:700;font-size:21px;color:#fff;padding:4px 10px 14px;letter-spacing:-.01em}
@@ -27,7 +29,7 @@ h3{font-size:13px;font-weight:650;margin:0 0 6px;color:var(--muted)}
 .nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:#C7D2E6;text-decoration:none;font-weight:500}
 .nav a:hover{background:rgba(255,255,255,.07);color:#fff}
 .nav a.active{background:#fff;color:var(--primary)}
-.nav a .ico{width:18px;text-align:center;font-size:15px}
+.nav a .ico{width:18px;text-align:center;font-size:15px;flex:none}
 .nav .sep{height:1px;background:rgba(255,255,255,.12);margin:8px 6px}
 .sidebar .foot{margin-top:auto;font-size:11px;color:#8A9BBB;padding:8px 10px}
 .main{display:flex;flex-direction:column;min-width:0;height:100vh}
@@ -300,12 +302,6 @@ table.t tr.row.pole-gris:hover > td { background: rgba(110, 122, 145, .16); }
 
 .pic{width:1.15em;height:1.15em;vertical-align:-.2em}
 
-/* Version en ligne (ajouté par outils/publier.py) : sur iPad, le menu de gauche doit pouvoir défiler,
-   et 100dvh suit la vraie hauteur de l'écran de Safari (barre d'adresse comprise). */
-#app{height:100vh;height:100dvh}
-.main{height:100vh;height:100dvh}
-.sidebar{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;min-height:0}
-
 /* Synchro chiffrée (js/sync.js) */
 .sync-pill{margin:6px 10px 0;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.06);color:#DCE3F0;font:inherit;font-size:11.5px;text-align:left;cursor:pointer}
 .sync-pill[data-etat=ok]{color:#8ED0A8}.sync-pill[data-etat=err]{color:#F2B8A0}
@@ -316,3 +312,50 @@ table.t tr.row.pole-gris:hover > td { background: rgba(110, 122, 145, .16); }
 .h-pas{flex:0 0 30px;border:1px solid var(--line2);border-radius:7px;background:#f6f7f9;font:inherit;font-size:15px;font-weight:600;line-height:1;cursor:pointer;color:inherit;padding:0}
 .h-pas:hover{background:#eceff4}
 .h-moins{order:-1} /* le champ vient en premier : un clic sur le libellé met le curseur dans le champ */
+
+/* ESS : tableau par mois */
+.ess-mois{margin-top:16px}.ess-mois.fini{opacity:.75}
+.ess-titre-mois{font-size:15px;margin:0 0 6px;padding:6px 10px;border-radius:8px;background:var(--bg);border-left:4px solid #2F6FB3;display:flex;align-items:center;gap:8px}
+.ess-titre-mois.en-cours{background:#EAF4FF}
+.ess-titre-mois.afixer{border-left-color:var(--warn);background:var(--warn-soft)}
+.ess-t tr.ess-row{cursor:pointer}.ess-t tr.ess-row:hover td{background:rgba(0,0,0,.03)}
+.ess-t tr.passee td{color:var(--muted);opacity:.55}
+.ess-t tr.semaine td{background:var(--ok-soft)}.ess-t tr.semaine td:first-child{box-shadow:inset 3px 0 0 var(--ok)}
+.ess-t tr.afixer td{background:#FDE7CC}.ess-t tr.afixer td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+.ess-cal{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;width:42px;height:42px;border-radius:8px;background:var(--surface);border:1px solid var(--line2);line-height:1}
+.ess-cal b{font-size:17px}.ess-cal small{font-size:10px;text-transform:uppercase;color:var(--muted);margin-top:2px}
+.ess-legende{display:flex;gap:14px;flex-wrap:wrap;margin:2px 0 4px;color:var(--muted)}
+.ess-l{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-2px}
+.ess-l.semaine{background:var(--ok-soft);border:1px solid var(--ok)}.ess-l.passee{background:var(--line);opacity:.7}.ess-l.afixer{background:#FDE7CC;border:1px solid var(--warn)}
+@media print{.ess-t tr.afixer td{background:#FDE7CC!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.pill.ess{background:#2F6FB3;color:#fff}
+
+/* Conseils de classe (même présentation que les ESS, couleur violette) */
+.pill.cc{background:#6E4BB8;color:#fff}
+.ess-titre-mois.cc{border-left-color:#6E4BB8}.ess-titre-mois.cc.en-cours{background:#F1ECFB}
+.cc-t tbody.cc-jour{border-top:2px solid var(--line2)}
+.cc-t tbody.cc-jour.passee td{color:var(--muted);opacity:.55}
+.cc-t tbody.cc-jour.semaine td{background:var(--ok-soft)}.cc-t tbody.cc-jour.semaine td.ess-date{box-shadow:inset 3px 0 0 var(--ok)}
+.cc-t td.ess-date{vertical-align:top}.cc-t td.ess-date .pill{margin-top:4px;font-size:10px}
+.bandeau-cc{background:#F1ECFB;border:1px solid #B9A3E3;border-radius:10px;padding:10px 14px;margin-bottom:12px}
+.bandeau-cc ul{list-style:none;padding:0;margin:6px 0 0}.bandeau-cc li{padding:3px 0}
+.cc-cartes{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.cc-carte{border:1px solid var(--line2);border-left:4px solid #6E4BB8;border-radius:10px;padding:8px 10px;background:var(--surface)}
+.cc-carte.auj{border-left-color:var(--bad);background:var(--bad-soft)}.cc-carte.passee{opacity:.55}
+.cc-carte-h{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.cc-ligne{display:flex;gap:10px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line);cursor:pointer}.cc-ligne:hover{background:rgba(0,0,0,.03)}
+.cc-h{font-weight:700;min-width:46px}
+@media print{.cc-t tbody.cc-jour.semaine td{background:none!important}}
+
+/* PPS / MOPPS : sections les unes sous les autres */
+.doss-bloc{margin-bottom:14px}
+.doss-bloc tr.doss-urgent td{background:var(--bad-soft)}
+.doss-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.doss-chip{display:inline-flex;gap:6px;align-items:baseline;padding:6px 10px;border:1px solid var(--line);border-left:4px solid;border-radius:8px;background:var(--surface);color:inherit;text-decoration:none;font-size:13px}
+.doss-chip:hover{background:var(--bg)}
+.tscroll{overflow-x:auto}
+
+/* AESH : personnages en mauve « individuel » */
+.ico-aesh{color:var(--indiv)}
+nav a .lib{min-width:0}nav a .lib .pill{margin-left:3px;vertical-align:1px;font-size:12.5px;padding:1px 7px;box-shadow:0 0 0 1.5px rgba(255,255,255,.85)}
+@media (max-width:500px){body.menu-open .sidebar{width:66vw;max-width:250px}body.menu-open .sidebar::before{width:inherit}#bottombar{justify-content:center;gap:2px}#bottombar a,#bottombar button{flex:0 0 51px;font-size:10.5px}}

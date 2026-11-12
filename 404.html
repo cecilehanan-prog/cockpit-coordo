@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Cockpit Coordo a déménagé</title>
+<link rel="canonical" href="https://cockpit-coordo.netlify.app/">
+<meta http-equiv="refresh" content="0; url=https://cockpit-coordo.netlify.app/">
+<script>
+  // L'ancienne appli installée ici avait un service worker : on le retire pour qu'elle ne reste pas en cache.
+  if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+  if (window.caches) caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {});
+  location.replace('https://cockpit-coordo.netlify.app/' + location.search + location.hash);
+</script>
+<style>
+  body{font-family:system-ui,-apple-system,sans-serif;background:#f4f7fb;color:#1d2b3a;margin:0;padding:40px 16px;text-align:center}
+  a{color:#1f5f8b;font-weight:600}
+  @media (prefers-color-scheme:dark){body{background:#14202c;color:#e4ecf4}a{color:#8fc3ea}}
+</style>
+</head>
+<body>
+<h1>Le cockpit a déménagé</h1>
+<p>Nouvelle adresse : <a href="https://cockpit-coordo.netlify.app/">cockpit-coordo.netlify.app</a></p>
+<p>Pense à mettre à jour ton favori ou l'icône sur l'écran d'accueil.</p>
+</body>
+</html>

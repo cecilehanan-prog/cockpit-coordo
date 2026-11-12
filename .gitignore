@@ -6,3 +6,6 @@
 *.pdf
 .DS_Store
 __pycache__/
+# Icônes de l'appli (pas des photos d'élèves)
+!en-ligne/*.png
+!en-ligne/icons/*.png

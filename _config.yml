@@ -1,0 +1,6 @@
+# GitHub Pages ne sert plus que les pages de redirection vers Netlify.
+# Les copies de sauvegarde du code ne sont pas publiées ici.
+exclude:
+  - en-ligne
+  - mac
+  - README.md

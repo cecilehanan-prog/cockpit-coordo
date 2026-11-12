@@ -1,10 +1,8 @@
-// Garde le cockpit disponible hors connexion. Les données, elles, restent dans le navigateur (localStorage).
-const CACHE = "cockpit-coordo-v10";
-const SHELL = ["./", "index.html", "manifest.webmanifest", "icon.svg"];
-self.addEventListener("install", e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));
-self.addEventListener("activate", e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
-self.addEventListener("fetch", e => {
-  const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== location.origin) return;
-  e.respondWith(fetch(e.request).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r; }).catch(() => caches.match(e.request)));
-});
+// Ancien service worker de l'appli installée sur github.io : il se retire tout seul
+// et vide son cache, pour que l'adresse renvoie bien vers https://cockpit-coordo.netlify.app/
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', e => e.waitUntil((async () => {
+  for (const k of await caches.keys()) await caches.delete(k);
+  await self.registration.unregister();
+  for (const c of await self.clients.matchAll({ type: 'window' })) c.navigate('https://cockpit-coordo.netlify.app/');
+})()));
