@@ -359,3 +359,16 @@ table.t tr.row.pole-gris:hover > td { background: rgba(110, 122, 145, .16); }
 .ico-aesh{color:var(--indiv)}
 nav a .lib{min-width:0}nav a .lib .pill{margin-left:3px;vertical-align:1px;font-size:12.5px;padding:1px 7px;box-shadow:0 0 0 1.5px rgba(255,255,255,.85)}
 @media (max-width:500px){body.menu-open .sidebar{width:66vw;max-width:250px}body.menu-open .sidebar::before{width:inherit}#bottombar{justify-content:center;gap:2px}#bottombar a,#bottombar button{flex:0 0 51px;font-size:10.5px}}
+/* bannière « ce qui se passe » : explique les pastilles d'Absences AESH et de DS demande d'accompagnement */
+.bandeau-rempl{background:#FFF1F0;border:1px solid #F2A39B;border-left:5px solid var(--bad,#d92d20);border-radius:10px;padding:10px 14px;margin-bottom:12px}
+.bandeau-rempl .br-tete{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.bandeau-rempl ul{list-style:none;padding:0;margin:6px 0 0}
+.bandeau-rempl .br-l{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:5px 0;border-top:1px dashed rgba(0,0,0,.08)}
+.bandeau-rempl .br-l:first-child{border-top:0}
+.bandeau-rempl .br-txt{display:flex;gap:8px;align-items:flex-start;color:inherit;text-decoration:none;flex:1;min-width:0;line-height:1.35}
+.bandeau-rempl .br-txt:hover span:last-child{text-decoration:underline}
+.bandeau-rempl .br-ico{flex:0 0 auto;min-width:26px;text-align:center}
+.bandeau-rempl .br-af{white-space:nowrap}
+.bandeau-rempl .br-aide{margin-top:6px}
+@keyframes flashCible{0%,40%{background:#FFE58F;box-shadow:0 0 0 3px #FFD24D}100%{background:transparent;box-shadow:none}}
+.flash-cible{animation:flashCible 2.6s ease-out}
