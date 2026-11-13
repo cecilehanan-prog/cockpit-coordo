@@ -138,8 +138,68 @@ function bandeauEssProches() {
   const auj = aujourdhui(), dans = iso => { const n = Math.round((new Date(iso + 'T12:00:00') - new Date(auj + 'T12:00:00')) / 864e5); return n === 0 ? '<b style="color:#d92d20">AUJOURD\'HUI</b>' : n === 1 ? 'demain' : 'dans ' + n + ' jours'; };
   p.insertAdjacentHTML('afterbegin', `<div class="bandeau-ess-j2 no-print" style="background:#EAF4FF;border:1px solid #7FB2E5;border-radius:10px;padding:10px 14px;margin-bottom:12px"><b>ESS à venir</b><ul style="list-style:none;padding:0;margin:6px 0 0">${L.map(e => `<li style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:3px 0"><span><a href="#/eleves/${e.id}" style="color:inherit"><b>${esc(e.nom)} ${esc(e.prenom)}</b></a> ${libDisp(e) ? '<span class="pill warn">' + libDisp(e) + '</span> ' : ''}<span class="muted">${esc(e.classe)}</span> · ${dans(e.essDate)} (${jourDe(e.essDate)} ${frDate(e.essDate)}${e.essHeure ? ' à ' + heureTxt(e.essHeure) : ''}) · salle ${e.essSalle ? esc(e.essSalle) : '<span class="pill warn">à saisir</span>'}${aeshEss(e).length ? ' · ' + aeshEss(e).map(a => esc(a.nom.split(' ')[0])).join(', ') : ''}</span><button class="btn sm" onclick="essVu('${cleJ2(e)}')">Vu</button></li>`).join('')}</ul></div>`);
 }
+/* ====================== BANNIÈRE « CE QUI SE PASSE » (remplacements et demandes de DS) ======================
+   Chaque pastille rouge d'Absences AESH et de DS demande d'accompagnement est expliquée en clair tout en haut de la page,
+   dès l'ouverture de l'appli. Un clic sur une ligne mène à l'élément concerné ; « Vu » retire la ligne (et la pastille). */
+function alerteAbs(id, type, d) {
+  S.alertesAbs = S.alertesAbs || [];
+  if (S.alertesAbs.some(x => x.id === id)) return; // même événement vu depuis un autre appareil : une seule ligne
+  S.alertesAbs.unshift({ id, type, le: new Date().toISOString(), vu: false, ...JSON.parse(JSON.stringify(d || {})) });
+  if (S.alertesAbs.length > 60) S.alertesAbs.length = 60;
+}
+const prenomA = id => { const a = aesh(id); return a ? a.nom.split(' ')[0] : '?'; };
+function eleveDuCreneau(creneauId) { const cr = S.creneaux.find(c => c.id === creneauId), e = cr && eleve(cr.eleveId); return e ? ` auprès de <b>${esc(e.prenom)} ${esc(e.nom)}</b> <span class="muted">(${esc(e.classe)})</span>` : ''; }
+const deNom = n => (/^[aeiouyhâàéèêëîïôûAEIOUYHÂÀÉÈÊËÎÏÔÛ]/.test(n) ? 'd’' : 'de ') + esc(n);
+const hCourt = h => hh(h || '').replace(/^0/, '');
+const quandPrise = p => `du <b>${jourDe(p.date)} ${p.date.slice(8, 10)}/${p.date.slice(5, 7)} à ${hCourt(p.debut)}</b>`;
+function alertesRemplacements() {
+  const L = [], vues = new Set(S.prisesVues || []);
+  (S.prisesOcc || []).filter(p => !p.parCoordination && !vues.has(p.occId)).sort((a, b) => (a.date + a.debut).localeCompare(b.date + b.debut)).forEach(p => L.push({
+    cle: 'p:' + p.occId, ico: '✋', k: 'ok', lien: '#/absences', cible: 'cr-' + p.creneauId,
+    html: `<b>${esc(prenomA(p.remplacantId))}</b> s'est positionnée sur le créneau de remplacement ${quandPrise(p)}${eleveDuCreneau(p.creneauId)}, à la place ${deNom(prenomA(p.absentId))}.` }));
+  (S.alertesAbs || []).filter(x => !x.vu).forEach(x => {
+    if (x.type === 'retour') L.push({ cle: 'a:' + x.id, ico: '↩', k: 'neutral', lien: '#/aesh/' + x.aeshId, cible: '',
+      html: `<b>${esc(prenomA(x.aeshId))}</b> est réintégrée automatiquement : son absence (${esc(x.motif || 'absence')}) est finie depuis le ${x.fin.slice(8, 10)}/${x.fin.slice(5, 7)}.${x.n ? ` ${x.n} créneau${x.n > 1 ? 'x' : ''} de remplacement archivé${x.n > 1 ? 's' : ''}.` : ''}` });
+    else if (x.type === 'annulation') L.push({ cle: 'a:' + x.id, ico: '✗', k: 'bad', lien: '#/absences', cible: 'cr-' + x.creneauId,
+      html: `<b>${esc(prenomA(x.remplacantId))}</b> a annulé sa prise du créneau ${quandPrise(x)}${eleveDuCreneau(x.creneauId)} : ce créneau est de nouveau à couvrir.` });
+  });
+  return L;
+}
+function alertesDemandesDS() {
+  const auj = aujourdhui(), L = [];
+  (S.evals.demandes || []).slice().sort((a, b) => (a.date + a.debut).localeCompare(b.date + b.debut)).forEach(d => {
+    const quand = `du <b>${jourDe(d.date)} ${d.date.slice(8, 10)}/${d.date.slice(5, 7)} à ${hCourt(d.debut)}</b> en ${esc(d.classe)}`, base = { lien: '#/evals', cible: 'ev-' + d.id };
+    if (d.statut === 'nouvelle') L.push({ ...base, ico: '✉', k: 'bad', html: `Nouvelle demande d'accompagnement pour le DS ${quand}, de ${esc(d.profNom || d.prof || 'un.e enseignant.e')} : à proposer aux AESH.` });
+    else if (d.statut === 'proposee') { const pos = (d.candidats || []).filter(c => c.positionne); if (pos.length) L.push({ ...base, ico: '✋', k: 'warn', html: `<b>${pos.map(c => esc((c.nom || '').split(' ')[0])).join(', ')}</b> ${pos.length > 1 ? 'se sont positionnées' : "s'est positionnée"} sur la demande de DS ${quand} : à valider.` }); }
+    else if (d.statut === 'acceptee' && d.desiste && d.date >= auj) L.push({ ...base, ico: '⚠', k: 'bad', html: `<b>${esc((d.aesh || prenomA(d.aeshId) || '').split(' ')[0])}</b> s'est désistée du DS ${quand} : propose-le à une autre AESH.` });
+  });
+  return L;
+}
+window.allerA = (lien, cible, cle) => { if (cle) marquerVu(cle, true); window.__cible = cible || ''; if (location.hash === lien) render(); else location.hash = lien; };
+function marquerVu(cle, sansRendu) {
+  if (cle.startsWith('p:')) { const id = cle.slice(2); S.prisesVues = S.prisesVues || []; if (!S.prisesVues.includes(id)) S.prisesVues.push(id); }
+  else if (cle.startsWith('a:')) { const x = (S.alertesAbs || []).find(y => y.id === cle.slice(2)); if (x) x.vu = true; }
+  save(); majCompteurAbsences(); if (!sansRendu) render();
+}
+window.alerteVu = cle => marquerVu(cle);
+window.alertesToutVu = () => { alertesRemplacements().forEach(x => marquerVu(x.cle, true)); render(); };
+function allerCible() {
+  const c = window.__cible; if (!c) return; window.__cible = '';
+  setTimeout(() => { const el = document.getElementById(c); if (!el) return; el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.remove('flash-cible'); void el.offsetWidth; el.classList.add('flash-cible'); }, 60);
+}
+function rafraichirBandeauRempl() { const b = document.querySelector('#page .bandeau-rempl'); if (b) b.remove(); try { bandeauRemplacements(); } catch (x) { } }
+function bandeauRemplacements() {
+  const p = $('#page'); if (!p || p.querySelector('.bandeau-rempl')) return;
+  const R = alertesRemplacements(), D = alertesDemandesDS(); if (!R.length && !D.length) return;
+  const ligne = x => `<li class="br-l"><a class="br-txt" href="${x.lien}" onclick="event.preventDefault();allerA('${x.lien}','${x.cible}','${x.cle || ''}')"><span class="pill ${x.k} br-ico">${x.ico}</span><span>${x.html}</span></a>${x.cle ? `<button class="btn sm" onclick="alerteVu('${esc(x.cle)}')" title="Retirer ce message et la pastille">Vu</button>` : `<span class="small muted br-af">à traiter</span>`}</li>`;
+  p.insertAdjacentHTML('afterbegin', `<div class="bandeau-rempl no-print" role="status">
+    ${R.length ? `<div class="br-tete"><b>Absences AESH · ${R.length} nouveauté${R.length > 1 ? 's' : ''}</b>${R.length > 1 ? '<button class="btn sm ghost" onclick="alertesToutVu()">Tout marquer comme vu</button>' : ''}</div><ul>${R.map(ligne).join('')}</ul>` : ''}
+    ${D.length ? `<div class="br-tete"${R.length ? ' style="margin-top:8px"' : ''}><b>DS demande d'accompagnement · ${D.length} à traiter</b></div><ul>${D.map(ligne).join('')}</ul>` : ''}
+    <div class="small muted br-aide">Clique sur une ligne pour aller à l'endroit concerné.${R.length ? ' « Vu » retire le message et la pastille.' : ''}${D.length ? ' Les demandes de DS disparaissent d\'ici quand elles sont traitées.' : ''}</div></div>`);
+}
 function bandeauEss() {
   try { bandeauConseils(); } catch (x) { }
+  try { bandeauRemplacements(); } catch (x) { console.warn(x); }
   bandeauEssProches();
   const d = essDus(); if (!d.n || /^#\/ess/.test(location.hash)) return;
   const p = $('#page'); if (!p || p.querySelector('.bandeau-ess')) return;
@@ -416,7 +476,7 @@ function load() {
         fresh.segmentsRempl = saved.segmentsRempl || fresh.segmentsRempl;
         fresh.prisesOcc = saved.prisesOcc || fresh.prisesOcc;
         fresh.pubApercu = saved.pubApercu || false; fresh.serveur = saved.serveur || fresh.serveur; fresh.evals = saved.evals || fresh.evals; fresh.evalsVues = saved.evalsVues || fresh.evalsVues; if (saved.questions) { fresh.questions = saved.questions; fresh.questionsAjoutees = saved.questionsAjoutees; }
-        fresh.affConfirmees = saved.affConfirmees || fresh.affConfirmees; fresh.essVus = saved.essVus || fresh.essVus; fresh.prisesVues = saved.prisesVues || fresh.prisesVues; fresh.essRappels = saved.essRappels || fresh.essRappels; fresh.essNotif = saved.essNotif || fresh.essNotif; fresh.conseils = saved.conseils || fresh.conseils; fresh.conseilsVus = saved.conseilsVus || fresh.conseilsVus; fresh.conseilsNotif = saved.conseilsNotif || fresh.conseilsNotif; // rappels d'ESS déjà envoyés
+        fresh.affConfirmees = saved.affConfirmees || fresh.affConfirmees; fresh.essVus = saved.essVus || fresh.essVus; fresh.prisesVues = saved.prisesVues || fresh.prisesVues; fresh.alertesAbs = saved.alertesAbs || fresh.alertesAbs; fresh.essRappels = saved.essRappels || fresh.essRappels; fresh.essNotif = saved.essNotif || fresh.essNotif; fresh.conseils = saved.conseils || fresh.conseils; fresh.conseilsVus = saved.conseilsVus || fresh.conseilsVus; fresh.conseilsNotif = saved.conseilsNotif || fresh.conseilsNotif; // rappels d'ESS déjà envoyés
         fresh.absences = saved.absences || fresh.absences; // historique des absences : saisie de l'appli, conservée
         // saisies faites dans l'appli (calendrier, règles de l'équipe, souhaits, dispositif et compteur d'heures supplémentaires des AESH) : conservées
         if (saved.calendrier) fresh.calendrier = saved.calendrier;
@@ -449,7 +509,7 @@ function migrate(s) {
   // questions ajoutées par Claude : chaque question n'est ajoutée qu'une fois (suivi dans questionsAjoutees), ce que Cécile supprime ou coche n'est pas recréé
   s.questionsAjoutees = s.questionsAjoutees || ['q1'];
   QUESTIONS_INITIALES.forEach(q => { if (!s.questionsAjoutees.includes(q.id) && !s.questions.some(x => x.id === q.id)) { s.questions.push({ ...q }); } if (!s.questionsAjoutees.includes(q.id)) s.questionsAjoutees.push(q.id); });
-  s.essVus = s.essVus || {}; s.prisesVues = s.prisesVues || null; s.essRappels = s.essRappels || {}; s.essNotif = s.essNotif || {};
+  s.essVus = s.essVus || {}; s.prisesVues = s.prisesVues || null; s.alertesAbs = s.alertesAbs || []; if (!s.alertesInit) { s.alertesInit = true; const lim = new Date(Date.now() - 7 * 864e5).toISOString(); (s.journal || []).filter(j => j.date >= lim && / réintégrée automatiquement \(fin de /.test(j.texte || '')).forEach(j => { const a = (s.aesh || []).find(x => j.texte.startsWith(x.nom + ' réintégrée')); const m = j.texte.match(/fin de (.+?) le (\d\d)\/(\d\d)\/(\d{4})/), n = (j.texte.match(/archivés : (\d+)/) || [])[1]; if (a && m && !s.alertesAbs.some(x => x.id === 'retour-' + a.id + '-' + m[4] + '-' + m[3] + '-' + m[2])) s.alertesAbs.push({ id: 'retour-' + a.id + '-' + m[4] + '-' + m[3] + '-' + m[2], type: 'retour', le: j.date, vu: false, aeshId: a.id, fin: m[4] + '-' + m[3] + '-' + m[2], motif: m[1], n: n ? +n : 0 }); }); } s.essRappels = s.essRappels || {}; s.essNotif = s.essNotif || {};
   s.conseils = s.conseils || []; s.conseilsVus = s.conseilsVus || {}; s.conseilsNotif = s.conseilsNotif || {};
   s.segmentsRempl = s.segmentsRempl || [];
   // historique des absences : une seule fiche par absence (aucun doublon quand les données de référence sont rechargées)
@@ -1005,7 +1065,7 @@ function integrerPrises(prises) {
   (prises || []).forEach(p => {
     const i = S.prisesOcc.findIndex(x => x.occId === p.occId);
     if (i >= 0 && S.prisesOcc[i].parCoordination) return; // la décision de la coordination prime sur l'appli en ligne
-    if (p.annulee) { if (i >= 0) { S.prisesOcc.splice(i, 1); retrait++; } return; }
+    if (p.annulee) { if (i >= 0) { alerteAbs('annul-' + p.occId + '-' + Date.now(), 'annulation', S.prisesOcc[i]); S.prisesOcc.splice(i, 1); retrait++; } return; }
     // verrou du passé : une prise de l'équipe enregistrée après le début du cours n'est pas retenue ; une décision de la coordination l'est toujours
     if (!p.priseLe || (!p.parCoordination && p.priseLe >= `${p.date}T${p.debut}`)) { rejet++; return; }
     const cr = S.creneaux.find(c => c.id === p.creneauId), rec = { occId: p.occId, creneauId: p.creneauId, absentId: cr ? cr.aeshId : null, date: p.date, debut: p.debut, fin: p.fin, remplacantId: p.aeshId, priseLe: p.priseLe, parCoordination: !!p.parCoordination };
@@ -1025,12 +1085,12 @@ window.prisesActualiser = async (silencieux = false) => {
     const j = await apiServeur('/api/admin/prises'), avant = new Set(S.prisesOcc.map(p => p.occId)), r = integrerPrises(j.prises); window.prisesEtat = { ok: true, le: new Date().toTimeString().slice(0, 5), n: (j.prises || []).filter(p => !p.annulee).length };
     if (S.prisesVues === null) S.prisesVues = [...avant]; // première synchro : on ne notifie pas l'existant
     const neuves = S.prisesOcc.filter(p => !avant.has(p.occId));
-    if (r.ajout || r.retrait) { save(); majCompteurAbsences(); if (/^#\/(absences|aesh\/)/.test(location.hash)) render(); }
+    if (r.ajout || r.retrait) { save(); majCompteurAbsences(); if (/^#\/(absences|aesh\/)/.test(location.hash)) render(); else rafraichirBandeauRempl(); }
     if (neuves.length && silencieux) { const t = neuves.map(p => `${(aesh(p.remplacantId) || {}).nom || '?'} remplace ${(aesh(p.absentId) || {}).nom || '?'} le ${p.date.slice(8, 10)}/${p.date.slice(5, 7)}`).join(' ; '); toast('Remplacement pris : ' + t); try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Cockpit Coordo — remplacement pris', { body: t }); } catch (x) { } }
     return true;
   } catch (x) { window.prisesEtat = { ok: false, le: new Date().toTimeString().slice(0, 5), msg: String(x && x.message || x) }; if (!silencieux) toast('Appli en ligne : ' + window.prisesEtat.msg.slice(0, 90)); return false; }
 };
-function majCompteurAbsences() { const el = document.getElementById('nav-absences'); if (!el) return; const vues = new Set(S.prisesVues || []), n = (S.prisesOcc || []).filter(p => !vues.has(p.occId)).length; el.textContent = n || ''; el.style.display = n ? '' : 'none'; majTitreEtBadge(); }
+function majCompteurAbsences() { const el = document.getElementById('nav-absences'); if (!el) return; const n = alertesRemplacements().length; el.textContent = n || ''; el.style.display = n ? '' : 'none'; majTitreEtBadge(); }
 // pastille sur l'icône de l'appli quand c'est possible (navigateur / PWA) et dans le titre de l'onglet
 function majTitreEtBadge() {
   const tot = ['nav-evals', 'nav-absences', 'nav-ess', 'nav-alertes', 'nav-questions'].slice(0, 3).reduce((t, id) => { const e = document.getElementById(id); return t + (e && e.style.display !== 'none' ? parseInt(e.textContent) || 0 : 0); }, 0);
@@ -1138,7 +1198,7 @@ function pageEvals() {
       : d.statut === 'proposee' ? `${pos.map(c => `<button class="btn primary sm" onclick="evalValider('${d.id}','${c.id}')">Valider ${esc(c.nom)}</button>`).join(' ') || '<span class="small muted">Aucune AESH positionnée pour l\'instant.</span>'} <button class="btn sm" onclick="evalElargir('${d.id}')" ${d.visibleA ? '' : 'disabled'}>Élargir à toute l'équipe</button> <button class="btn sm" onclick="evalRefuser('${d.id}')">Refuser</button> <button class="btn sm ghost" onclick="evalAnnuler('${d.id}')">Annuler</button>`
       : d.statut === 'acceptee' && d.desiste ? `<button class="btn primary sm" onclick="evalProposer('${d.id}')">Proposer à une autre AESH…</button> <button class="btn sm ghost" onclick="evalAnnuler('${d.id}')">Annuler</button>`
       : d.statut === 'acceptee' ? `<button class="btn sm" onclick="evalInfos('${d.id}')">${d.liberee ? 'Modifier l’élève et les aides' : 'Communiquer l’élève et les aides'}</button> <button class="btn sm ghost" onclick="evalAnnuler('${d.id}')">Annuler</button>` : '';
-    return `<div class="card" style="margin-bottom:12px;border-left:4px solid var(--${d.statut === 'nouvelle' || d.desiste ? 'bad' : d.statut === 'acceptee' ? 'ok' : 'warn'})"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h2 style="margin:0">${jourDe(d.date)} ${frDate(d.date)} · ${hh(d.debut)}–${hh(d.fin)}</h2><span><span class="pill ${k}">${lib}</span>${d.liberee ? ' <span class="pill ok">infos élève communiquées</span>' : ''}</span></div>
+    return `<div class="card" id="ev-${d.id}" style="margin-bottom:12px;border-left:4px solid var(--${d.statut === 'nouvelle' || d.desiste ? 'bad' : d.statut === 'acceptee' ? 'ok' : 'warn'})"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h2 style="margin:0">${jourDe(d.date)} ${frDate(d.date)} · ${hh(d.debut)}–${hh(d.fin)}</h2><span><span class="pill ${k}">${lib}</span>${d.liberee ? ' <span class="pill ok">infos élève communiquées</span>' : ''}</span></div>
       <div style="margin:4px 0"><b>${esc(d.type)}</b> · classe <b>${esc(d.classe)}</b> · salle <b>${esc(d.salle)}</b> · demandé par ${esc(d.profNom || d.prof)}${d.notifie ? ' · <span class="pill ok">élève notifié</span>' : ''}${d.commentaire ? ` <span class="muted">— « ${esc(d.commentaire)} »</span>` : ''}</div>
       <div class="small muted" style="margin:4px 0">${eleves.length ? 'Élèves suivis dans cette classe (visible de toi seule) : ' + eleves.map(e => `${esc(e.nom)} ${esc(e.prenom)}${libDisp(e) ? ' (' + libDisp(e) + ')' : ''} → ${affOf(e).filter(x => x.heures > 0).map(x => esc((aesh(x.aeshId) || {}).nom || '?')).join(', ')}`).join(' · ') : 'Aucun élève suivi par une AESH dans cette classe.'}</div>
       ${d.statut === 'proposee' ? `<div class="small" style="margin:4px 0">${d.visibleA ? `Proposée à ${d.visibleA.length} AESH (${d.visibleA.map(id => esc((aesh(id) || {}).nom || id)).join(', ')})` : 'Proposée à toute l\'équipe'} · ${pos.length} positionnée${pos.length > 1 ? 's' : ''}${pos.length ? ' : ' + pos.map(c => esc(c.nom) + (c.libre ? '' : ' (a cours : laisserait son élève)') + (c.suitClasse ? ' ★' : '')).join(', ') : ''}</div>` : ''}
@@ -1152,7 +1212,7 @@ function pageEvals() {
     ${autres.length ? `<div class="card" style="margin-top:14px"><h2>Terminées, refusées ou passées <span class="pill neutral">${autres.length}</span></h2><table class="t compact"><tbody>${autres.slice(-15).reverse().map(d => `<tr><td class="small">${frDate(d.date)} ${hh(d.debut)}</td><td class="small">${esc(d.classe)} · ${esc(d.salle)}</td><td class="small">${esc(d.profNom || d.prof)}</td><td class="small">${esc((STATUTS_EVAL[d.statut] || [d.statut])[0])}${d.aesh ? ' · ' + esc(d.aesh) : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
 }
 function pageAbsences() {
-  { const vues = (S.prisesOcc || []).map(p => p.occId); if (JSON.stringify(vues) !== JSON.stringify(S.prisesVues || [])) { S.prisesVues = vues; save(); } majCompteurAbsences(); }
+  if (S.prisesVues === null) { S.prisesVues = (S.prisesOcc || []).map(p => p.occId); save(); } majCompteurAbsences(); // les nouveautés restent signalées dans la bannière du haut jusqu'au clic sur « Vu »
   setTitle('Absences AESH', `<button class="btn primary" onclick="declarerAbsence()">+ Déclarer une absence</button>`);
   const ouvertes = (S.absences || []).filter(x => x.ouvert), st = statsAbsences();
   const toutes = ouvertes.flatMap(ab => creneauxACouvrir(ab.aeshId)), pris = toutes.filter(c => c.remplacantId || prisesEnLigne(c).length).length;
@@ -1160,10 +1220,10 @@ function pageAbsences() {
   const kpi = (v, l, k = '') => `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
   const cartes = ouvertes.map(ab => { const a = aesh(ab.aeshId); if (!a) return ''; const L = creneauxACouvrir(ab.aeshId), per = `${ab.debut ? 'du ' + frDate(ab.debut) : ''}${ab.fin ? ' au ' + frDate(ab.fin) : ' — fin à préciser'}`;
     const rows = L.map(cr => { const e = eleve(cr.eleveId), cand = candidatsRemplacement(cr);
-      return `<tr><td class="small"><b>${cr._dates.slice(0, 4).map(dateCourte).join(', ')}${cr._dates.length > 4 ? ' …(+' + (cr._dates.length - 4) + ')' : ''}</b><br>${cr.debut}–${cr.fin}</td><td class="small">${classeHtml(e)}${sansNomEleve(cr.matiere) ? ' · <span class="muted">' + esc(sansNomEleve(cr.matiere)) + '</span>' : ''}</td><td class="small muted"><a href="#/eleves/${e.id}" style="color:inherit">${esc(e.nom)} ${esc(e.prenom)}</a></td>
+      return `<tr id="cr-${cr.id}"><td class="small"><b>${cr._dates.slice(0, 4).map(dateCourte).join(', ')}${cr._dates.length > 4 ? ' …(+' + (cr._dates.length - 4) + ')' : ''}</b><br>${cr.debut}–${cr.fin}</td><td class="small">${classeHtml(e)}${sansNomEleve(cr.matiere) ? ' · <span class="muted">' + esc(sansNomEleve(cr.matiere)) + '</span>' : ''}</td><td class="small muted"><a href="#/eleves/${e.id}" style="color:inherit">${esc(e.nom)} ${esc(e.prenom)}</a></td>
         <td><select onchange="assignerRemplacant('${cr.id}',this.value)" style="min-width:230px"><option value="">— à couvrir —</option>${cand.map(c => `<option value="${c.id}" ${cr.remplacantId === c.id ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select></td><td>${prisesEnLigne(cr).length ? `<div style="margin-bottom:4px">${prisesEnLigne(cr).map(p => `<span class="pill ok" title="${p.parCoordination ? 'Attribué par la coordination' : 'Pris dans l\'appli en ligne'} le ${frDate(p.priseLe.slice(0, 10))} à ${p.priseLe.slice(11)}">✓ ${esc(((aesh(p.remplacantId) || {}).nom || '?').split(' ')[0])} · ${dateCourte(p.date)}</span> <button class="btn sm no-print" style="padding:1px 7px" title="Mettre quelqu'un d'autre" onclick="changerPriseOcc('${esc(p.occId)}')">Changer</button> <button class="btn sm no-print" style="padding:1px 7px" title="La collègue ne vient pas : libérer le créneau" onclick="retirerPriseOcc('${esc(p.occId)}')">Retirer</button>`).join('<br>')}</div>` : ''}${cr.remplacantId ? `<span class="pill ok">pris</span>${cr.remplacantDepuis ? `<div class="small muted">depuis le ${frDate(cr.remplacantDepuis.slice(0, 10))} à ${cr.remplacantDepuis.slice(11)}</div>` : ''}` : (datesAVenir(cr).every(dt => prisesEnLigne(cr).some(p => p.date === dt)) && prisesEnLigne(cr).length ? '' : `<span class="pill warn">${prisesEnLigne(cr).length ? 'autres dates à couvrir' : 'à couvrir'}</span>`)}</td></tr>`; }).join('');
     const nbPris = L.filter(c => c.remplacantId || prisesEnLigne(c).length).length;
-    return `<div class="card" style="margin-bottom:14px;border-left:4px solid var(--warn)"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h2 style="margin:0"><a href="#/aesh/${a.id}" style="color:inherit" title="Voir son emploi du temps et les remplaçant.e.s">${esc(a.nom)}</a> <span class="pill warn">${esc(ab.motif || a.statut)}</span> <span class="small muted">${per}</span></h2>
+    return `<div class="card" id="abs-${a.id}" style="margin-bottom:14px;border-left:4px solid var(--warn)"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h2 style="margin:0"><a href="#/aesh/${a.id}" style="color:inherit" title="Voir son emploi du temps et les remplaçant.e.s">${esc(a.nom)}</a> <span class="pill warn">${esc(ab.motif || a.statut)}</span> <span class="small muted">${per}</span></h2>
       <span class="no-print"><button class="btn sm primary" onclick="prevenirEquipe('${a.id}')">Prévenir l'équipe</button> <button class="btn sm" onclick="finAbsence('${a.id}')">Fin d'absence</button></span></div>
       <div class="small muted" style="margin:6px 0 8px">${nbPris} créneau${nbPris > 1 ? 'x' : ''} pris sur ${L.length}. Les propositions tiennent compte des disponibilités, des dispositifs (ULIS / SEGPA), des souhaits et de la quotité (✓ convient · ⚠ avec réserve · ✗ indisponible). 🔒 Une heure déjà passée ne peut plus être attribuée : la personne qui remplace n'est créditée que des cours qui commencent après le moment où le créneau est pris, et si on change de remplaçant.e, les cours déjà passés restent à la personne précédente. Le créneau pris apparaît sur l'EDT de ${esc(a.nom.split(' ')[0])} et sur la fiche de la personne qui remplace.</div>
       ${L.length ? `<table class="t compact"><thead><tr><th>Date(s) et horaire</th><th>Classe</th><th>Élève</th><th>Remplaçant.e</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="muted small">Aucun créneau touché par cette absence sur la période (vacances, semaine sans cours ou EDT non saisi).</div>'}</div>`; }).join('');
@@ -1179,9 +1239,10 @@ function pageAbsences() {
       <p class="small muted" style="margin:8px 0 0"><b>Comment lire :</b> les heures de remplacement comptent chaque semaine scolaire écoulée depuis la prise du créneau (vacances, jours fériés et semaines Q1 / Q2 respectés). Les heures faites au-delà de la quotité sont mises de côté dans le compteur d'heures supplémentaires de la fiche AESH, à récupérer plus tard.</p></div>
     ${histo ? `<div class="card" style="margin-top:14px"><h2>Absences terminées</h2><table class="t compact"><thead><tr><th>AESH</th><th>Motif</th><th>Période</th><th class="no-print"></th></tr></thead><tbody>${histo}</tbody></table></div>` : ''}
     ${(S.prisesOcc || []).length ? `<div class="card" style="margin-top:14px"><h2>Créneaux pris dans l'appli en ligne</h2><table class="t compact"><thead><tr><th>Date</th><th>Horaire</th><th>Absence de</th><th>Pris par</th><th>Pris le</th><th class="no-print"></th></tr></thead><tbody>${S.prisesOcc.slice().sort((x, y) => (y.date + y.debut).localeCompare(x.date + x.debut)).map(p => { const ab = aesh(p.absentId), r = aesh(p.remplacantId); return `<tr><td>${frDate(p.date)}</td><td>${hh(p.debut)}–${hh(p.fin)}</td><td>${esc(ab ? ab.nom : '?')}</td><td>${esc(r ? r.nom : '?')}${p.parCoordination ? ' <span class="pill warn">coordination</span>' : ''}</td><td class="small muted">${frDate(p.priseLe.slice(0, 10))} ${p.priseLe.slice(11)}</td><td class="no-print" style="text-align:right"><button class="btn sm" onclick="changerPriseOcc('${esc(p.occId)}')">Changer</button> <button class="btn sm" onclick="retirerPriseOcc('${esc(p.occId)}')">Retirer</button></td></tr>`; }).join('')}</tbody></table></div>` : ''}
+    ${S.serveur && S.serveur.url === 'https://enligne.coordo' ? `<div class="card no-print" style="margin-top:14px"><h2>Prévenir les collègues d'une absence <span class="pill ok">relié à l'appli en ligne</span></h2><p class="small muted" style="margin:0 0 8px"><b>Rien à régler ici.</b> Quand tu déclares une absence, Cockpit met aussitôt les créneaux à prendre dans l'appli en ligne : chaque collègue les voit dans son lien personnel. La première fois pour chaque absence, Cockpit ouvre aussi un mail déjà rédigé (collègues en copie cachée) : il ne part que quand tu cliques sur <b>Envoyer</b> dans ta messagerie. Les créneaux pris par les collègues reviennent ici tout seuls, toutes les 2 minutes. Le bouton « Prévenir l'équipe » d'une absence ouvre le même genre de mail, avec la liste détaillée des créneaux.</p><button class="btn sm" onclick="publierAuto(true)">Renvoyer les créneaux à l'appli maintenant</button></div>` : `
     <div class="card no-print" style="margin-top:14px"><h2>Envoi automatique aux collègues <span class="pill ${S.serveur && S.serveur.url && S.serveur.cle ? 'ok' : 'neutral'}">${S.serveur && S.serveur.url && S.serveur.cle ? 'activé' : 'non configuré'}</span></h2><p class="small muted" style="margin:0 0 8px">Quand tu déclares une absence ici, Cockpit envoie les créneaux à l'appli en ligne, qui prévient <b>automatiquement par mail</b> les collègues pouvant en prendre un (une seule fois par absence) ; elles se positionnent ensuite dans l'appli. Il faut l'adresse de l'appli en ligne et la clé qui t'a été donnée à son installation (elle reste sur ce Mac).</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="srv-url" type="text" placeholder="Adresse de l'appli en ligne (https://…)" value="${esc((S.serveur || {}).url || '')}" style="flex:2;min-width:240px"><input id="srv-cle" type="password" placeholder="Clé" value="${esc((S.serveur || {}).cle || '')}" style="flex:1;min-width:140px"><button class="btn" onclick="serveurEnregistrer()">Enregistrer et vérifier</button><button class="btn" onclick="serveurEnregistrer().then(ok => ok && publierAuto(true))">Tester l'envoi</button></div><div id="srv-etat" class="small muted" style="margin-top:6px">${S.serveur && S.serveur.url ? 'Adresse enregistrée : ' + esc(S.serveur.url) : ''}</div></div>
-    <div class="card no-print" style="margin-top:14px"><h2>Appli en ligne pour l'équipe</h2><p class="small muted" style="margin:0 0 8px">Les AESH se positionnent sur leur téléphone (appli en ligne, dossier « remplacements-en-ligne »). <b>1.</b> Publier : par défaut le fichier ne contient que <b>la classe, l'horaire et la matière</b> (aucune donnée d'élève ne quitte ton poste ; tu transmets les consignes toi-même). Si tu coches la case ci-dessous, le prénom et les consignes pratiques sont aussi envoyés au serveur, jamais montrés dans la liste, et le prénom n'est communiqué que si tu le décides (effacés le lendemain du cours). <b>2.</b> Récupérer les prises : fichier téléchargé dans la rubrique « Coordination » de l'appli en ligne. Pour l'équipe, un créneau dont l'heure de début est passée ne peut plus être pris ni annulé ; toi seule peux encore le modifier dans l'onglet Coordination (inscrit au journal). En attendant, « Prévenir l'équipe » reste possible.</p><label class="small" style="display:block;margin:0 0 8px"><input type="checkbox" ${S.pubApercu ? 'checked' : ''} onchange="pubApercu(this.checked)"> Inclure aussi le prénom et les consignes pratiques (sinon aucune donnée d'élève n'est publiée)</label><button class="btn" onclick="exporterACouvrir()">Publier vers l'appli en ligne (fichier)</button> <label class="btn" style="cursor:pointer">Récupérer les prises<input type="file" accept=".json" style="display:none" onchange="importerPrises(event)"></label></div>`;
+    <div class="card no-print" style="margin-top:14px"><h2>Appli en ligne pour l'équipe</h2><p class="small muted" style="margin:0 0 8px">Les AESH se positionnent sur leur téléphone (appli en ligne, dossier « remplacements-en-ligne »). <b>1.</b> Publier : par défaut le fichier ne contient que <b>la classe, l'horaire et la matière</b> (aucune donnée d'élève ne quitte ton poste ; tu transmets les consignes toi-même). Si tu coches la case ci-dessous, le prénom et les consignes pratiques sont aussi envoyés au serveur, jamais montrés dans la liste, et le prénom n'est communiqué que si tu le décides (effacés le lendemain du cours). <b>2.</b> Récupérer les prises : fichier téléchargé dans la rubrique « Coordination » de l'appli en ligne. Pour l'équipe, un créneau dont l'heure de début est passée ne peut plus être pris ni annulé ; toi seule peux encore le modifier dans l'onglet Coordination (inscrit au journal). En attendant, « Prévenir l'équipe » reste possible.</p><label class="small" style="display:block;margin:0 0 8px"><input type="checkbox" ${S.pubApercu ? 'checked' : ''} onchange="pubApercu(this.checked)"> Inclure aussi le prénom et les consignes pratiques (sinon aucune donnée d'élève n'est publiée)</label><button class="btn" onclick="exporterACouvrir()">Publier vers l'appli en ligne (fichier)</button> <label class="btn" style="cursor:pointer">Récupérer les prises<input type="file" accept=".json" style="display:none" onchange="importerPrises(event)"></label></div>`}`;
 }
 function carteAbsencesAesh(a) {
   const s2 = statsAbsences()[a.id] || { nbAbs: 0, jours: 0, remplCr: 0, remplH: 0, extra: 0 }, hist = (S.absences || []).filter(x => x.aeshId === a.id).slice().sort((p, q) => (q.debut || '').localeCompare(p.debut || ''));
@@ -1235,11 +1296,11 @@ function render() {
   const ss = document.getElementById('savestate'); if (ss && !ss.textContent) ss.textContent = 'Données chargées';
   $('#brand-sub').textContent = (S.etablissement || 'Suivi AESH') + ' · ' + S.annee;
   const page = $('#page'); page.className = 'page';
-  if (name === 'eleves' && id) { ficheEleve(id); return bandeauEss(); }
-  if (name === 'aesh' && id) { ficheAesh(id); return bandeauEss(); }
+  if (name === 'eleves' && id) { ficheEleve(id); bandeauEss(); return allerCible(); }
+  if (name === 'aesh' && id) { ficheAesh(id); bandeauEss(); return allerCible(); }
   if (name === 'pps' && id) return pagePPSForm(id);
   (routes[name] || pageSynthese)();
-  bandeauEss(); page.scrollTop = 0;
+  bandeauEss(); page.scrollTop = 0; allerCible();
 }
 window.addEventListener('hashchange', render);
 function setTitle(t, actions = '') { $('#title').textContent = t; $('#topactions').innerHTML = actions; }
@@ -1703,7 +1764,7 @@ function verifierRetours() {
     const n = archiverRemplacements(a.id); const ab = (S.absences || []).find(x => x.aeshId === a.id && x.ouvert); if (ab) { ab.ouvert = false; ab.fin = a.absenceFin; }
     const motif = String(a.statut).toLowerCase();
     log('aesh', `${a.nom} réintégrée automatiquement (fin de ${motif} le ${new Date(a.absenceFin).toLocaleDateString('fr-FR')})${n ? ' ; remplacements archivés : ' + n + ' créneau' + (n > 1 ? 'x' : '') : ''}`);
-    revenues.push(a.nom); a.statut = 'Actif'; a.absenceDebut = null; a.absenceFin = null;
+    alerteAbs('retour-' + a.id + '-' + a.absenceFin, 'retour', { aeshId: a.id, fin: a.absenceFin, motif, n }); revenues.push(a.nom); a.statut = 'Actif'; a.absenceDebut = null; a.absenceFin = null;
   });
   if (revenues.length) { save(); render(); toast(`${revenues.join(', ')} : de retour, réintégrée${revenues.length > 1 ? 's' : ''} automatiquement`); }
   return revenues.length;
