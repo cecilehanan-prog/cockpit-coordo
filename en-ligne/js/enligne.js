@@ -154,6 +154,23 @@ async function api(chemin, corps) {
   }
   const id = corps && corps.id, dref = id ? ref.collection('demandes').doc(id) : null, dS = dref ? await dref.get() : null, d = dS && dS.exists ? dS.data() : null;
   if (!d) throw new Error('Demande introuvable');
+  if (chemin === '/api/admin/demandes/supprimer') { // efface la demande et les candidatures des AESH qui s'y rapportent
+    const rs = await ref.collection('reponses').where('demandeId', '==', id).get(), b = db.batch();
+    rs.forEach(r => b.delete(r.ref)); b.delete(dref); await b.commit(); await republier(db, cfg, { conf });
+    if (corps.prevenir) { const aE = d.statut === 'acceptee' && corps.aeshAussi ? emailA(d.aeshId) : '';
+      mail([aE, d.profEmail].filter(Boolean).join(','), 'Accompagnement annulé : ' + frD(d.date) + ' ' + hh(d.debut), `Bonjour,\n\nL'accompagnement AESH prévu le ${libD(d)} (${d.type}) est annulé.\n\nMerci de votre compréhension.` + SIGNATURE); }
+    return { message: 'Demande supprimée' };
+  }
+  if (chemin === '/api/admin/demandes/modifier') {
+    const ch = corps.champs || {}, M = {};
+    [['type', 40], ['date', 10], ['debut', 5], ['fin', 5], ['classe', 40], ['salle', 40], ['profNom', 80], ['profEmail', 120], ['commentaire', 500]].forEach(([k, n]) => { if (typeof ch[k] === 'string') M[k] = ch[k].trim().slice(0, n); });
+    if ('notifie' in ch) M.notifie = !!ch.notifie;
+    await dref.update(M); await republier(db, cfg, { conf });
+    const n = Object.assign({}, d, M);
+    if (corps.prevenir) { const aE = n.statut === 'acceptee' && corps.aeshAussi ? emailA(n.aeshId) : '';
+      mail([aE, n.profEmail].filter(Boolean).join(','), 'Accompagnement modifié : ' + frD(n.date) + ' ' + hh(n.debut), `Bonjour,\n\nLa demande d'accompagnement AESH a été modifiée. Nouvelles informations : ${libD(n)} (${n.type}).${n.statut === 'acceptee' && n.aesh ? '\n\nAESH : ' + n.aesh + '.' : ''}\n\nMerci !` + SIGNATURE); }
+    return { message: 'Demande modifiée' };
+  }
   if (chemin === '/api/admin/demandes/annuler') { await dref.update({ statut: 'annulee' }); await republier(db, cfg, { conf }); return { message: 'Demande annulée' }; }
   if (chemin === '/api/admin/demandes/liberer') {
     await dref.update({ note: String(corps.note || '').slice(0, 4000), liberee: true }); await republier(db, cfg, { conf });

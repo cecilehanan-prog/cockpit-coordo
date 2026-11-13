@@ -1167,6 +1167,40 @@ window.evalElargir = id => { if (confirm('Élargir cette demande à toute l\'éq
 window.evalValider = (id, aid) => { const a = aesh(aid); if (confirm(`Valider ${a ? a.nom : 'cette AESH'} ? Elle et l'enseignant.e recevront un mail de validation (tu reçois une copie).`)) actionEval('/api/admin/demandes/decider', { id, decision: 'accepter', aeshId: aid }); };
 window.evalRefuser = id => { const m = prompt('Motif du refus (envoyé à l\'enseignant.e) :', ''); if (m !== null) actionEval('/api/admin/demandes/decider', { id, decision: 'refuser', message: m }); };
 window.evalAnnuler = id => { if (confirm('Annuler cette demande ?')) actionEval('/api/admin/demandes/annuler', { id }); };
+// Modifier ou supprimer une demande (aussi celles reçues en ligne) — demandé par Hanan le 13/11
+const TYPES_EVAL = ['Devoir surveillé', 'Évaluation', 'Examen blanc', 'Sortie', 'Autre'];
+const evalQui = d => d.statut === 'acceptee' && d.aeshId && !d.desiste ? 'l\'AESH validée et l\'enseignant.e' : 'l\'enseignant.e';
+window.evalModifier = id => {
+  const d = demandeEval(id); if (!d) return; const types = TYPES_EVAL.includes(d.type) ? TYPES_EVAL : TYPES_EVAL.concat(d.type ? [d.type] : []);
+  modal(`<h2>Modifier la demande</h2><p class="small muted" style="margin-top:0">Corrige ce qui est faux, puis Enregistrer. ${d.statut === 'proposee' || d.statut === 'acceptee' ? 'Les AESH voient tout de suite la demande corrigée dans leur lien.' : ''}</p>
+    <div class="form-grid">
+      <label class="f">Pour quoi ?<select name="type">${types.map(t => `<option ${t === d.type ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+      <label class="f">Date<input type="date" name="date" value="${esc(d.date)}" required></label>
+      <label class="f">Début<input type="time" name="debut" value="${esc(d.debut)}" step="300" required></label>
+      <label class="f">Fin<input type="time" name="fin" value="${esc(d.fin)}" step="300" required></label>
+      <label class="f">Classe<input name="classe" value="${esc(d.classe)}" maxlength="40"></label>
+      <label class="f">Salle<input name="salle" value="${esc(d.salle)}" maxlength="40"></label>
+      <label class="f">Enseignant.e<input name="profNom" value="${esc(d.profNom || d.prof || '')}" maxlength="80"></label>
+      <label class="f">Son e-mail<input type="email" name="profEmail" value="${esc(d.profEmail || '')}" maxlength="120"></label>
+    </div>
+    <label style="display:block;margin:8px 0"><input type="checkbox" name="notifie" ${d.notifie ? 'checked' : ''}> Pour un élève notifié (qui a une AESH)</label>
+    <label class="f wide">Commentaire<textarea name="commentaire" rows="2" maxlength="500" style="width:100%">${esc(d.commentaire || '')}</textarea></label>
+    ${d.statut === 'nouvelle' ? '' : `<label style="display:block;margin:10px 0 0"><input type="checkbox" name="mail"> Prévenir ${evalQui(d)} par mail du changement</label>`}`, f => {
+    if (!f.date || !f.debut || !f.fin) { alert('La date, le début et la fin sont obligatoires.'); return false; }
+    if (f.fin <= f.debut) { alert('L\'heure de fin doit être après l\'heure de début.'); return false; }
+    const champs = { type: f.type, date: f.date, debut: f.debut, fin: f.fin, classe: f.classe || '', salle: f.salle || '', profNom: f.profNom || '', profEmail: f.profEmail || '', notifie: !!f.notifie, commentaire: f.commentaire || '' };
+    if (serveurOK()) actionEval('/api/admin/demandes/modifier', { id, champs, prevenir: !!f.mail, aeshAussi: d.statut === 'acceptee' && !d.desiste });
+    else { Object.assign(d, champs); commit('aesh', 'Demande d\'accompagnement modifiée'); }
+  }, () => setTimeout(() => evalSupprimer(id), 0));
+};
+window.evalSupprimer = id => {
+  const d = demandeEval(id); if (!d) return;
+  if (!confirm(`Supprimer définitivement cette demande ?\n\n${libDemande(d)}${d.profNom ? ' · ' + d.profNom : ''}\n\nElle disparaît du cockpit et des liens des AESH. On ne peut pas revenir en arrière.`)) return;
+  const prevenir = (d.statut === 'proposee' || d.statut === 'acceptee') && d.date >= aujourdhui() && confirm(`Prévenir ${evalQui(d)} par mail que l'accompagnement est annulé ?\n\nOK = ouvrir un mail prêt à envoyer · Annuler = supprimer sans mail`);
+  S.evalsVues = (S.evalsVues || []).filter(x => x !== id);
+  if (serveurOK()) actionEval('/api/admin/demandes/supprimer', { id, prevenir, aeshAussi: d.statut === 'acceptee' && !d.desiste });
+  else { S.evals.demandes = (S.evals.demandes || []).filter(x => x.id !== id); commit('aesh', 'Demande d\'accompagnement supprimée'); }
+};
 window.evalInfos = id => {
   const d = demandeEval(id); if (!d) return;
   // Élève notifié : nom, prénom et récapitulatif d'accompagnement repris de la fiche élève (élèves de la classe qui ont une AESH affectée) ; modifiable avant envoi
@@ -1203,13 +1237,13 @@ function pageEvals() {
       <div class="small muted" style="margin:4px 0">${eleves.length ? 'Élèves suivis dans cette classe (visible de toi seule) : ' + eleves.map(e => `${esc(e.nom)} ${esc(e.prenom)}${libDisp(e) ? ' (' + libDisp(e) + ')' : ''} → ${affOf(e).filter(x => x.heures > 0).map(x => esc((aesh(x.aeshId) || {}).nom || '?')).join(', ')}`).join(' · ') : 'Aucun élève suivi par une AESH dans cette classe.'}</div>
       ${d.statut === 'proposee' ? `<div class="small" style="margin:4px 0">${d.visibleA ? `Proposée à ${d.visibleA.length} AESH (${d.visibleA.map(id => esc((aesh(id) || {}).nom || id)).join(', ')})` : 'Proposée à toute l\'équipe'} · ${pos.length} positionnée${pos.length > 1 ? 's' : ''}${pos.length ? ' : ' + pos.map(c => esc(c.nom) + (c.libre ? '' : ' (a cours : laisserait son élève)') + (c.suitClasse ? ' ★' : '')).join(', ') : ''}</div>` : ''}
       ${d.statut === 'acceptee' ? `<div class="small" style="margin:4px 0">AESH validée : <b>${esc((cands.find(c => c.id === d.aeshId) || aesh(d.aeshId) || {}).nom || d.aesh || '')}</b>${d.desiste ? ' <span class="pill bad">⚠ s\'est désistée</span> : propose la demande à une autre AESH (l\'enseignant.e recevra un nouveau mail de validation).' : ''}</div>` : ''}
-      ${d.reponse ? `<div class="small muted">Réponse : ${esc(d.reponse)}</div>` : ''}<div class="no-print" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${acts}</div></div>`; };
+      ${d.reponse ? `<div class="small muted">Réponse : ${esc(d.reponse)}</div>` : ''}<div class="no-print" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${acts} <span style="margin-left:auto;display:flex;gap:6px"><button class="btn sm" onclick="evalModifier('${d.id}')">Modifier</button> <button class="btn sm danger" onclick="evalSupprimer('${d.id}')">Supprimer</button></span></div></div>`; };
   $('#page').innerHTML = `<div class="kpis" style="margin-bottom:14px">${kpi(n('nouvelle'), 'à traiter', n('nouvelle') ? 'bad' : 'ok')}${kpi(n('proposee'), 'proposées aux AESH', n('proposee') ? 'warn' : '')}${kpi(n('acceptee'), 'validées à venir', 'ok')}${kpi(L.length, 'demandes reçues')}</div>
     ${serveurOK() && evalsEtat.ok === false ? `<div class="card" style="margin-bottom:14px;border-left:4px solid var(--bad)"><b>L'appli en ligne ne répond pas</b> <span class="small">(${evalsEtat.le})</span><div class="small" style="margin:4px 0 8px">${esc(evalsEtat.msg)}</div><button class="btn sm" onclick="evalsActualiser()">Réessayer</button> <a class="btn sm" href="#/absences">Vérifier l'adresse et la clé</a></div>` : serveurOK() && evalsEtat.ok ? `<div class="small muted" style="margin-bottom:8px">✓ Appli en ligne reliée · actualisé à ${evalsEtat.le}</div>` : ''}
     ${serveurOK() ? '' : `<div class="card" style="margin-bottom:14px;border-left:4px solid var(--warn)"><b>Appli en ligne non reliée.</b> <span class="small muted">Les demandes des enseignant.e.s arriveront ici dès que l'adresse et la clé de l'appli en ligne sont saisies (Absences AESH → « Envoi automatique aux collègues »). En attendant tu peux charger un fichier téléchargé depuis l'appli en ligne : <label class="btn sm" style="cursor:pointer">Charger le fichier<input type="file" accept=".json" style="display:none" onchange="importerEvals(event)"></label></span></div>`}
-    <p class="small muted" style="margin:0 0 10px">Fonctionnement : l'enseignant.e saisit sa demande dans l'appli en ligne (accusé de réception par mail, tu reçois la demande ici et par mail). Tu la <b>proposes</b> à toute l'équipe ou à certaines AESH (celles qui suivent la classe sont pré-cochées) ; elles se positionnent ; tu <b>valides</b> : mail à l'AESH et à l'enseignant.e, copie pour toi ; puis tu <b>communiques l'élève et les aides</b>. Mise à jour automatique toutes les 2 minutes.</p>
+    <p class="small muted" style="margin:0 0 10px">Fonctionnement : l'enseignant.e saisit sa demande dans l'appli en ligne (accusé de réception par mail, tu reçois la demande ici et par mail). Tu la <b>proposes</b> à toute l'équipe ou à certaines AESH (celles qui suivent la classe sont pré-cochées) ; elles se positionnent ; tu <b>valides</b> : mail à l'AESH et à l'enseignant.e, copie pour toi ; puis tu <b>communiques l'élève et les aides</b>. Les boutons <b>Modifier</b> et <b>Supprimer</b> corrigent ou effacent une demande (aussi dans l'appli en ligne). Mise à jour automatique toutes les 2 minutes.</p>
     ${actives.map(carte).join('') || '<div class="empty">Aucune demande en cours.</div>'}
-    ${autres.length ? `<div class="card" style="margin-top:14px"><h2>Terminées, refusées ou passées <span class="pill neutral">${autres.length}</span></h2><table class="t compact"><tbody>${autres.slice(-15).reverse().map(d => `<tr><td class="small">${frDate(d.date)} ${hh(d.debut)}</td><td class="small">${esc(d.classe)} · ${esc(d.salle)}</td><td class="small">${esc(d.profNom || d.prof)}</td><td class="small">${esc((STATUTS_EVAL[d.statut] || [d.statut])[0])}${d.aesh ? ' · ' + esc(d.aesh) : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+    ${autres.length ? `<div class="card" style="margin-top:14px"><h2>Terminées, refusées ou passées <span class="pill neutral">${autres.length}</span></h2><table class="t compact"><tbody>${autres.slice(-15).reverse().map(d => `<tr><td class="small">${frDate(d.date)} ${hh(d.debut)}</td><td class="small">${esc(d.classe)} · ${esc(d.salle)}</td><td class="small">${esc(d.profNom || d.prof)}</td><td class="small">${esc((STATUTS_EVAL[d.statut] || [d.statut])[0])}${d.aesh ? ' · ' + esc(d.aesh) : ''}</td><td class="small no-print" style="white-space:nowrap;text-align:right"><button class="btn sm" onclick="evalModifier('${d.id}')">Modifier</button> <button class="btn sm danger" onclick="evalSupprimer('${d.id}')">Supprimer</button></td></tr>`).join('')}</tbody></table></div>` : ''}`;
 }
 function pageAbsences() {
   if (S.prisesVues === null) { S.prisesVues = (S.prisesOcc || []).map(p => p.occId); save(); } majCompteurAbsences(); // les nouveautés restent signalées dans la bannière du haut jusqu'au clic sur « Vu »
