@@ -2,21 +2,90 @@
    Toutes les données du cockpit sont chiffrées SUR L'APPAREIL (AES-GCM 256, clé tirée d'une phrase secrète
    que seule Cécile connaît, PBKDF2 600 000 tours) avant d'être envoyées dans son espace Firebase privé.
    Firebase ne voit qu'un bloc illisible et la date du dernier enregistrement.
-   Rien n'est actif tant que window.COCKPIT_FIREBASE (js/sync-config.js) est vide. */
+   Rien n'est actif tant que window.COCKPIT_FIREBASE (js/sync-config.js) est vide.
+
+   Version 2026-11-20a : les modifications ne « ressautent » plus.
+   - Avant : la copie enregistrée le plus récemment remplaçait TOUT. Un appareil resté sur de vieilles données (Mac ouvert,
+     onglet oublié) enregistrait quelque chose tout seul au démarrage (rappels, statuts…) : sa vieille copie devenait « la plus
+     récente » et effaçait partout les imports et les saisies faites ailleurs.
+   - Maintenant : quand deux appareils ont changé, on RÉUNIT les deux (élève par élève, champ par champ, à partir de la
+     dernière version commune). Rien n'est effacé sauf ce qui a vraiment été supprimé.
+   - Nouvel emplacement en ligne (« etat-v2 ») : les appareils qui ont encore l'ancien code ne peuvent plus rien écraser.
+     L'ancien emplacement est mis en pause (copie gardée dans « etat-ancien »), ces appareils affichent « ⚠ à vérifier ». */
 (() => {
 'use strict';
 const CFG = window.COCKPIT_FIREBASE;
 const APP = () => window.cockpitSync; // fourni par app.js : { cle, appliquer(d) }
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
-const L = { cle: 'cockpit-sync-cle', sel: 'cockpit-sync-sel', vu: 'cockpit-sync-vu', copie: 'cockpit-pas-v1-copie-avant-synchro' };
+const L = { cle: 'cockpit-sync-cle', sel: 'cockpit-sync-sel', vu: 'cockpit-sync-vu2', base: 'cockpit-sync-base2',
+  copie: 'cockpit-pas-v1-copie-avant-synchro', copie2: 'cockpit-pas-v1-copie-avant-v2' };
+const DOC = 'etat-v2', ANCIEN = 'etat', ANCIEN_SAUVE = 'etat-ancien', PAUSE = 'en-pause-mettre-a-jour';
 const ITER = 600000;
-const VERSION = '2026-11-19c'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
+const VERSION = '2026-11-20a'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
 let distant = null; // { appareil, savedAt } du dernier bloc vu en ligne
 const get = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const put = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
 const b64 = buf => { let s = ''; const a = new Uint8Array(buf); for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
 const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const savedAt = txt => { try { return JSON.parse(txt)._savedAt || ''; } catch { return ''; } };
+
+/* ---------- dernière version commune (sert à réunir les modifications de deux appareils) ---------- */
+// gardée dans IndexedDB (place suffisante) ; à défaut dans localStorage ; à défaut, la réunion se fait sans rien supprimer
+function idb(mode, fn) {
+  return new Promise((ok, ko) => {
+    if (!window.indexedDB) return ko(new Error('pas d’IndexedDB'));
+    const r = indexedDB.open('cockpit-sync', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onerror = () => ko(r.error);
+    r.onsuccess = () => { const db = r.result; let q; try { const t = db.transaction('kv', mode); q = fn(t.objectStore('kv')); t.oncomplete = () => { db.close(); ok(q && q.result); }; t.onerror = t.onabort = () => { db.close(); ko(t.error); }; } catch (e) { db.close(); ko(e); } };
+  });
+}
+async function baseLire() { try { const v = await idb('readonly', s => s.get('base')); if (v) return v; } catch {} return get(L.base); }
+async function baseEcrire(txt) { try { await idb('readwrite', s => s.put(txt, 'base')); put(L.base, null); return; } catch {} try { localStorage.setItem(L.base, txt); } catch { put(L.base, null); } }
+
+/* ---------- réunion de deux versions (base = dernière version commune ; INCONNUE = on ne sait pas : rien n'est supprimé) ---------- */
+const ABSENT = { absent: 1 }, INCONNUE = { inconnue: 1 };
+const egal = (a, b) => a === b || (a !== ABSENT && b !== ABSENT && a !== INCONNUE && b !== INCONNUE && JSON.stringify(a) === JSON.stringify(b));
+const estObj = x => x !== null && typeof x === 'object' && !Array.isArray(x) && x !== ABSENT && x !== INCONNUE;
+function cleDe(x) {
+  if (x && typeof x === 'object' && !Array.isArray(x)) {
+    if (x.id != null) return 'id:' + x.id;
+    if (x.occId != null) return 'occ:' + x.occId;
+    if (x.eleveId != null && x.aeshId != null && x.date == null) return 'af:' + x.eleveId + '|' + x.aeshId; // affectation élève ↔ AESH
+  }
+  return 'v:' + JSON.stringify(x);
+}
+function indexer(t) { const m = new Map(), vus = {}; (t || []).forEach(x => { const k0 = cleDe(x); const n = vus[k0] = (vus[k0] || 0) + 1; m.set(n > 1 ? k0 + '#' + n : k0, x); }); return m; }
+function enfant(b, k) { if (b === INCONNUE) return INCONNUE; return estObj(b) && Object.prototype.hasOwnProperty.call(b, k) ? b[k] : ABSENT; }
+function reunir(b, l, r) {
+  if (egal(l, r)) return l;
+  if (b !== INCONNUE) { if (egal(l, b)) return r; if (egal(r, b)) return l; }
+  if (l === ABSENT) return r; // supprimé ici, modifié là-bas : on garde
+  if (r === ABSENT) return l;
+  if (estObj(l) && estObj(r)) {
+    const o = {};
+    for (const k of new Set([...Object.keys(r), ...Object.keys(l)])) {
+      const v = reunir(enfant(b, k), k in l ? l[k] : ABSENT, k in r ? r[k] : ABSENT);
+      if (v !== ABSENT) o[k] = v;
+    }
+    return o;
+  }
+  if (Array.isArray(l) && Array.isArray(r)) {
+    const bm = b === INCONNUE ? INCONNUE : Array.isArray(b) ? indexer(b) : new Map(), lm = indexer(l), rm = indexer(r), out = [];
+    const bv = k => bm === INCONNUE ? INCONNUE : bm.has(k) ? bm.get(k) : ABSENT;
+    for (const [k, rv] of rm) { const v = reunir(bv(k), lm.has(k) ? lm.get(k) : ABSENT, rv); if (v !== ABSENT) out.push(v); }
+    for (const [k, lv] of lm) if (!rm.has(k)) { const v = reunir(bv(k), lv, ABSENT); if (v !== ABSENT) out.push(v); }
+    return out;
+  }
+  return r; // même valeur changée des deux côtés : la version en ligne l'emporte
+}
+// base, local, distant : objets (états complets du cockpit). Renvoie l'état réuni.
+function reunirEtats(base, local, dist) {
+  const m = reunir(base == null ? INCONNUE : base, local, dist);
+  if (Array.isArray(m.journal)) m.journal.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  return m;
+}
+const sansDate = o => { const c = { ...o }; delete c._savedAt; return JSON.stringify(c); };
 
 /* ---------- chiffrement ---------- */
 async function deriver(phrase, sel) {
@@ -49,6 +118,7 @@ async function dechiffrer(doc, raw) {
 
 /* ---------- interface ---------- */
 const quand = t => { try { return t ? new Date(t).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '?'; } catch { return String(t); } };
+const echap = s => String(s ?? '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 let etat = 'off', message = '', utilisateur = null;
 function dire(e, m) {
   etat = e; if (m != null) message = m;
@@ -61,16 +131,28 @@ function bouton() {
   const b = document.createElement('button'); b.id = 'sync-pill'; b.type = 'button'; b.className = 'sync-pill no-print'; b.onclick = fenetre;
   const foot = side.querySelector('.foot'); side.insertBefore(b, foot); dire(CFG ? 'off' : 'attente');
 }
+// copies gardées sur cet appareil (avant qu'une synchro ne les remplace) : on peut y revenir
+function copiesGardees() {
+  let cur = null; try { cur = JSON.parse(get(APP().cle) || 'null'); } catch {}
+  const noms = s => new Set((s && s.eleves || []).filter(e => !e.archive).map(e => (e.nom || '') + ' ' + (e.prenom || '')));
+  const nc = noms(cur);
+  return [[L.copie, 'Copie gardée avant une synchro'], [L.copie2, 'Copie gardée au passage à la nouvelle synchro']].map(([k, lib]) => {
+    let s = null; try { s = JSON.parse(get(k) || 'null'); } catch {} if (!s || !Array.isArray(s.eleves)) return null;
+    const n = noms(s), plus = [...n].filter(x => !nc.has(x)), moins = [...nc].filter(x => !n.has(x));
+    return { k, lib, s, quand: s._savedAt, nb: n.size, plus, moins };
+  }).filter(Boolean);
+}
 function fenetre() {
   const ex = document.getElementById('sync-modal'); if (ex) ex.remove();
   if (typeof window.toggleMenu === 'function') window.toggleMenu(false); // iPhone : on referme le menu avant d'ouvrir la fenêtre
   const w = document.createElement('div'); w.id = 'sync-modal'; w.className = 'modal-bg no-print'; w.style.zIndex = 70;
   w.onclick = e => { if (e.target === w) w.remove(); };
   const connecte = !!(utilisateur && get(L.cle));
-  w.innerHTML = `<div class="modal" style="width:min(460px,94vw)"><h2 style="margin-top:0">Synchronisation</h2>
+  const copies = APP() ? copiesGardees() : [];
+  w.innerHTML = `<div class="modal" style="width:min(480px,94vw)"><h2 style="margin-top:0">Synchronisation</h2>
     <p class="small muted">Tes données sont chiffrées sur cet appareil avec ta <b>phrase secrète</b> avant d'être envoyées. Personne d'autre, ni Google ni Claude, ne peut les lire. Utilise la même phrase sur le Mac, l'iPad et l'iPhone.</p>
     ${!CFG ? `<p><b>Pas encore disponible :</b> ton espace Firebase n'est pas encore branché.</p>` : connecte ? `
-      <p>Connectée : <b>${(utilisateur.email || '').replace(/[<>&]/g, '')}</b></p>
+      <p>Connectée : <b>${echap(utilisateur.email || '')}</b></p>
       <div class="toolbar"><button class="btn" id="sync-maint">Synchroniser maintenant</button><button class="btn" id="sync-out">Se déconnecter de cet appareil</button></div>` : `
       <form id="sync-form" style="display:grid;gap:8px">
         <label>E-mail Firebase<br><input type="email" id="sync-mail" required autocomplete="username" style="width:100%"></label>
@@ -79,8 +161,14 @@ function fenetre() {
         <button class="btn primary" type="submit">Connecter cet appareil</button>
         <button class="btn" type="button" id="sync-reset" hidden>J'ai oublié ma phrase : recommencer depuis cet appareil</button>
       </form>`}
-    <p class="small" id="sync-msg" style="margin-top:10px">${message}</p>
-    <p class="small muted" style="margin:4px 0 0">Version ${VERSION}${distant ? ` · dernier envoi en ligne : ${String(distant.appareil || '?').replace(/[<>&]/g, '')}, ${quand(distant.savedAt)}` : ''}</p>
+    <p class="small" id="sync-msg" style="margin-top:10px">${echap(message)}</p>
+    <p class="small muted" style="margin:4px 0 0">Version ${VERSION}${distant ? ` · dernier envoi en ligne : ${echap(distant.appareil || '?')}, ${quand(distant.savedAt)}` : ''}</p>
+    ${copies.length ? `<details style="margin-top:10px"><summary class="small"><b>Revenir à une copie gardée sur cet appareil</b></summary>${copies.map((c, i) => `
+      <div class="small" style="margin:8px 0;padding:8px;border:1px solid var(--line,#ddd);border-radius:8px">${echap(c.lib)} : <b>${quand(c.quand)}</b>, ${c.nb} élèves.
+        ${c.plus.length ? `<div>En plus dans la copie : ${echap(c.plus.slice(0, 12).join(', '))}${c.plus.length > 12 ? '…' : ''}</div>` : ''}
+        ${c.moins.length ? `<div>Absents de la copie : ${echap(c.moins.slice(0, 12).join(', '))}${c.moins.length > 12 ? '…' : ''}</div>` : ''}
+        ${!c.plus.length && !c.moins.length ? '<div class="muted">Mêmes élèves que maintenant.</div>' : ''}
+        <button class="btn sm" type="button" data-copie="${i}" style="margin-top:6px">Revenir à cette copie</button></div>`).join('')}</details>` : ''}
     <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="sync-fermer">Fermer</button></div></div>`;
   document.body.appendChild(w);
   w.querySelector('#sync-fermer').onclick = () => w.remove();
@@ -88,11 +176,24 @@ function fenetre() {
   const rz = w.querySelector('#sync-reset'); if (rz) { rz.onclick = recommencer; rz.hidden = !enAttente; }
   const o = w.querySelector('#sync-out'); if (o) o.onclick = deconnecter;
   const m = w.querySelector('#sync-maint'); if (m) m.onclick = () => envoyer(true);
+  // deux clics (les fenêtres de confirmation du navigateur peuvent être bloquées)
+  w.querySelectorAll('[data-copie]').forEach(b => b.onclick = () => {
+    const c = copies[+b.dataset.copie]; if (!c) return;
+    if (!b.dataset.ok) { b.dataset.ok = '1'; b.className = 'btn sm danger'; b.textContent = 'Confirmer : remplacer les données actuelles par cette copie'; return; }
+    const s = JSON.parse(JSON.stringify(c.s)); s._savedAt = new Date().toISOString();
+    try { localStorage.setItem(APP().cle + '-avant-copie', get(APP().cle) || ''); } catch {}
+    APP().appliquer(s); // enregistré comme une modification de cet appareil : part vers les autres
+    w.remove(); dire(etat, 'Copie remise en place sur cet appareil.');
+  });
 }
 
 /* ---------- Firebase ---------- */
 let auth = null, docRef = null, arret = null, applique = false, minuterie = 0, pret = false;
 const charger = src => new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = ko; document.head.appendChild(s); });
+const dossier = u => firebase.firestore().collection('coffres').doc(u.uid).collection('cockpit');
+// une seule opération à la fois (réception, réunion, envoi) : rien ne se croise
+let file = Promise.resolve();
+const enFile = fn => (file = file.then(fn, fn).catch(e => { console.warn('Synchro', e); dire('err', 'Erreur de synchro : ' + (e && (e.code || e.message) || e)); }));
 async function demarrer() {
   bouton();
   if (!CFG) { dire('attente', 'La synchro sera prête dès que ton espace Firebase sera branché.'); return; }
@@ -109,14 +210,27 @@ async function demarrer() {
 function ecouter(u) {
   if (arret) arret();
   utilisateur = u; pret = false;
-  docRef = firebase.firestore().collection('coffres').doc(u.uid).collection('cockpit').doc('etat');
+  docRef = dossier(u).doc(DOC);
   dire('cours', 'Connectée avec ' + (u.email || '') + '.');
-  arret = docRef.onSnapshot(s => recevoir(s.data()), () => dire('err', "Je n'arrive pas à lire ton espace Firebase (règles ?)."));
+  enFile(() => mettreAncienEnPause(u));
+  arret = docRef.onSnapshot(s => { if (s.metadata && s.metadata.hasPendingWrites) return; const d = s.data(); enFile(() => recevoir(d)); },
+    () => dire('err', "Je n'arrive pas à lire ton espace Firebase (règles ?)."));
+}
+// L'ancien emplacement (« etat ») servait aux anciennes versions du code. On en garde une copie (« etat-ancien »), puis on le
+// remplace par un bloc « en pause » : un appareil resté sur l'ancien code affiche « ⚠ à vérifier » et n'envoie plus rien.
+async function mettreAncienEnPause(u) {
+  try {
+    const anc = dossier(u).doc(ANCIEN), d = (await anc.get()).data();
+    if (!d || d.sel === PAUSE) return;
+    const sauve = dossier(u).doc(ANCIEN_SAUVE);
+    if (!(await sauve.get()).exists && d.data) await sauve.set(d);
+    await anc.set({ v: 1, sel: PAUSE, iv: '', data: 'pause', gz: false, savedAt: '', appareil: 'ANCIENNE VERSION : mets à jour cet appareil (nouveau code du 20/11)' });
+  } catch (e) { console.warn('Ancien emplacement', e); }
 }
 // L'iPad et l'iPhone remplacent souvent ' par ’ (et ajoutent parfois un espace) : on essaie ces variantes
 function variantes(p) {
-  const droit = p.replace(/[\u2018\u2019\u02BC]/g, "'").replace(/[\u201C\u201D\u00AB\u00BB]/g, '"');
-  const courbe = p.replace(/'/g, '\u2019');
+  const droit = p.replace(/[‘’ʼ]/g, "'").replace(/[“”«»]/g, '"');
+  const courbe = p.replace(/'/g, '’');
   return [...new Set([p, p.trim(), droit, droit.trim(), courbe, courbe.trim(), droit.trim().replace(/\s+/g, ' ')])];
 }
 let enAttente = null; // { u, ref, phrase } quand la phrase ne correspond pas
@@ -126,8 +240,11 @@ async function connecter(mail, mdp, phrase) {
   dire('cours', 'Connexion…');
   try {
     const u = (await auth.signInWithEmailAndPassword(mail, mdp)).user;
-    const ref = firebase.firestore().collection('coffres').doc(u.uid).collection('cockpit').doc('etat');
-    const d = (await ref.get()).data(); if (d) distant = { appareil: d.appareil, savedAt: d.savedAt };
+    const ref = dossier(u).doc(DOC);
+    // la phrase se vérifie sur le bloc en ligne : le nouveau, sinon la copie de l'ancien
+    let d = (await ref.get()).data();
+    if (!(d && d.data)) { for (const n of [ANCIEN_SAUVE, ANCIEN]) { const x = (await dossier(u).doc(n).get()).data(); if (x && x.data && x.sel && x.sel !== PAUSE) { d = x; break; } } }
+    if (d) distant = { appareil: d.appareil, savedAt: d.savedAt };
     if (!(d && d.data)) { const sel0 = crypto.getRandomValues(new Uint8Array(16)); dire('cours', 'Préparation de la clé (quelques secondes)…'); return brancher(u, ref, await deriver(phrase.trim(), sel0), sel0); }
     const sel = unb64(d.sel);
     const essais = variantes(phrase);
@@ -156,8 +273,8 @@ async function recommencer() {
   const sel = crypto.getRandomValues(new Uint8Array(16)), raw = await deriver(phrase, sel);
   const local = get(APP().cle); if (!local) return dire('err', "Cet appareil n'a pas de données à envoyer.");
   const c = await chiffrer(local, raw);
-  await ref.set({ v: 1, sel: b64(sel), iv: c.iv, data: c.data, gz: c.gz, savedAt: savedAt(local), appareil: 'recommencé' });
-  put(L.sel, b64(sel)); put(L.cle, b64(raw)); put(L.vu, savedAt(local));
+  await ref.set({ v: 2, sel: b64(sel), iv: c.iv, data: c.data, gz: c.gz, savedAt: savedAt(local), appareil: 'recommencé' });
+  put(L.sel, b64(sel)); put(L.cle, b64(raw)); put(L.vu, savedAt(local)); await baseEcrire(local);
   enAttente = null; document.getElementById('sync-modal')?.remove(); ecouter(u);
   dire('ok', 'Nouvelle phrase en place. Reconnecte tes autres appareils avec elle.');
 }
@@ -167,43 +284,71 @@ async function deconnecter() {
   try { await auth.signOut(); } catch {}
   document.getElementById('sync-modal')?.remove(); dire('off', "Cet appareil n'est plus synchronisé. Ses données restent dessus.");
 }
-async function recevoir(d) {
+// applique un état reçu sans le renvoyer (l'appli peut ensuite l'enregistrer elle-même : ce sera une modification de cet appareil)
+function appliquerRecu(obj) { applique = true; try { APP().appliquer(obj); } finally { applique = false; } }
+function apresApplication(at) { if (savedAt(get(APP().cle)) !== at) planifier(); }
+async function recevoir(d, essai = 0) {
   if (d) distant = { appareil: d.appareil, savedAt: d.savedAt };
-  const raw = get(L.cle); if (!raw) return;
+  const raw = get(L.cle); if (!raw || !APP()) return;
+  if (d && d.sel && get(L.sel) && d.sel !== get(L.sel)) return dire('err', 'La clé a changé sur un autre appareil : reconnecte celui-ci.');
   const local = get(APP().cle), lAt = savedAt(local), vu = get(L.vu) || '';
-  if (!d || !d.data) { pret = true; return envoyer(); } // espace vide : cet appareil l'initialise
-  if (d.sel && get(L.sel) && d.sel !== get(L.sel)) return dire('err', 'La clé a changé sur un autre appareil : reconnecte celui-ci.');
   pret = true;
-  if (d.savedAt === lAt) { put(L.vu, d.savedAt); return dire('ok', 'Tout est à jour.'); }
-  const localModifie = lAt && lAt !== vu;
-  const premiere = !vu; // premier branchement de cet appareil : l'espace déjà rempli fait foi (copie locale gardée)
-  if (premiere || d.savedAt > lAt || !localModifie) {
-    let p; try { p = await ouvrir(d, unb64(raw)); } catch { return dire('err', 'Impossible de déchiffrer : vérifie ta phrase secrète (déconnecte puis reconnecte cet appareil).'); }
-    let texte; try { texte = new TextDecoder().decode(d.gz ? await decompresser(p) : p); } catch (e) { return dire('err', "La phrase est bonne, mais cet appareil n'arrive pas à décompresser les données (" + (e.message || e) + '). Vérifie la connexion internet puis recharge la page.'); }
-    if ((localModifie || premiere) && local) put(L.copie, local); // les deux appareils ont changé : on garde une copie de celui-ci
-    applique = true; try { APP().appliquer(JSON.parse(texte)); } finally { applique = false; }
-    put(L.vu, d.savedAt);
-    dire('ok', localModifie ? 'Mis à jour depuis un autre appareil (une copie de la version de cet appareil est gardée).' : 'Mis à jour depuis un autre appareil.');
-  } else envoyer();
+  if (!d || !d.data) return envoyerMaintenant(true); // espace vide : cet appareil l'initialise avec ses données
+  if (d.savedAt === lAt) { if (vu !== lAt) { put(L.vu, lAt); await baseEcrire(local); } return dire('ok', 'Tout est à jour.'); }
+  if (d.savedAt === vu) return lAt !== vu && local ? envoyerMaintenant() : dire('ok', 'Tout est à jour.'); // rien de nouveau en ligne ; nos changements partent
+  // il y a du nouveau en ligne
+  let p; try { p = await ouvrir(d, unb64(raw)); } catch { return dire('err', 'Impossible de déchiffrer : vérifie ta phrase secrète (déconnecte puis reconnecte cet appareil).'); }
+  let texte; try { texte = new TextDecoder().decode(d.gz ? await decompresser(p) : p); } catch (e) { return dire('err', "La phrase est bonne, mais cet appareil n'arrive pas à décompresser les données (" + (e.message || e) + '). Vérifie la connexion internet puis recharge la page.'); }
+  const dist = JSON.parse(texte);
+  if (!vu || !local) { // premier passage de cet appareil sur la nouvelle synchro : ce qui est en ligne fait foi (copie de cet appareil gardée)
+    if (local && sansDate(JSON.parse(local)) !== sansDate(dist)) put(L.copie2, local);
+    appliquerRecu(dist); put(L.vu, d.savedAt); await baseEcrire(texte); apresApplication(d.savedAt);
+    return dire('ok', 'Données récupérées depuis ' + (d.appareil || 'un autre appareil') + '.');
+  }
+  if (lAt === vu) { // seul l'autre appareil a changé
+    appliquerRecu(dist); put(L.vu, d.savedAt); await baseEcrire(texte); apresApplication(d.savedAt);
+    return dire('ok', 'Mis à jour depuis ' + (d.appareil || 'un autre appareil') + '.');
+  }
+  // les deux ont changé : on réunit, à partir de la dernière version commune
+  let base = null; try { const bt = await baseLire(); const bo = bt && JSON.parse(bt); if (bo && bo._savedAt === vu) base = bo; } catch {}
+  const m = reunirEtats(base, JSON.parse(local), dist);
+  if (get(APP().cle) !== local) return essai < 3 ? recevoir(d, essai + 1) : planifier(); // une saisie est arrivée pendant la réunion : on recommence
+  put(L.vu, d.savedAt); await baseEcrire(texte);
+  if (sansDate(m) === sansDate(dist)) { appliquerRecu(dist); apresApplication(d.savedAt); return dire('ok', 'Mis à jour depuis ' + (d.appareil || 'un autre appareil') + '.'); }
+  m._savedAt = new Date().toISOString();
+  appliquerRecu(m);
+  await envoyerMaintenant();
+  dire('ok', 'Modifications de cet appareil et de ' + (d.appareil || "l'autre appareil") + ' réunies.');
 }
-async function envoyer(force) {
+const nomAppareil = () => /iPad/.test(navigator.userAgent) ? 'iPad' : /iPhone/.test(navigator.userAgent) ? 'iPhone' : /Electron/.test(navigator.userAgent) ? 'Mac (appli)' : /\.netlify\.app$/.test(location.hostname) ? 'Netlify' : /github\.io$/.test(location.hostname) ? 'github.io' : 'navigateur';
+function envoyer(force) { return enFile(() => envoyerMaintenant(force)); }
+async function envoyerMaintenant(force, essai = 0) {
   const raw = get(L.cle); if (!docRef || !raw || (!pret && !force)) return;
   const local = get(APP().cle); if (!local) return;
-  const at = savedAt(local);
+  const at = savedAt(local), vu = get(L.vu) || '';
   dire('cours', null);
   try {
     const c = await chiffrer(local, unb64(raw));
-    await docRef.set({ v: 1, sel: get(L.sel), iv: c.iv, data: c.data, gz: c.gz, savedAt: at, appareil: /iPad/.test(navigator.userAgent) ? 'iPad' : /iPhone/.test(navigator.userAgent) ? 'iPhone' : /Electron/.test(navigator.userAgent) ? 'Mac (appli)' : 'navigateur' });
-    put(L.vu, at); dire('ok', 'Tout est à jour.');
+    const doc = { v: 2, sel: get(L.sel), iv: c.iv, data: c.data, gz: c.gz, savedAt: at, appareil: nomAppareil(), version: VERSION };
+    // on n'écrase jamais une version en ligne qu'on n'a pas encore vue : on la réunit d'abord
+    let autre = null;
+    await firebase.firestore().runTransaction(async t => {
+      const s = await t.get(docRef), d = s.data(); autre = null;
+      if (d && d.data && d.savedAt !== vu && d.savedAt !== at) { autre = d; return; }
+      t.set(docRef, doc);
+    });
+    if (autre) return essai < 3 ? recevoir(autre) : dire('err', 'Plusieurs appareils enregistrent en même temps : réessaie dans un instant.');
+    put(L.vu, at); await baseEcrire(local); dire('ok', 'Tout est à jour.');
   } catch (e) { dire(navigator.onLine ? 'err' : 'hors', navigator.onLine ? "L'envoi a échoué : " + (e.code || e.message || '') : 'Hors ligne : ce sera envoyé au retour de la connexion.'); }
 }
+function planifier() { clearTimeout(minuterie); minuterie = setTimeout(() => envoyer(), 2000); }
 // Chaque enregistrement du cockpit part (chiffré) quelques secondes plus tard
 const setItem = Storage.prototype.setItem;
 Storage.prototype.setItem = function (k, v) {
   setItem.call(this, k, v);
-  if (this === window.localStorage && APP() && k === APP().cle && !applique) { clearTimeout(minuterie); minuterie = setTimeout(() => envoyer(), 2000); }
+  if (this === window.localStorage && APP() && k === APP().cle && !applique) planifier();
 };
 addEventListener('online', () => envoyer());
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', demarrer); else demarrer();
-window.cockpitSyncTest = { chiffrer, dechiffrer, deriver };
+window.cockpitSyncTest = { chiffrer, dechiffrer, deriver, reunirEtats };
 })();
