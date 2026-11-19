@@ -467,7 +467,7 @@ function load() {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const saved = JSON.parse(raw);
-      if (seed && seed._seedVersion && saved._seedVersion !== seed._seedVersion) {
+      if (seed && seed._seedVersion && saved._seedVersion !== seed._seedVersion && !saved._savedAt) { // 20/11 : jamais sur des données déjà enregistrées dans l'appli (sinon les élèves créés et les imports disparaissaient au démarrage)
         // Les données de référence (élèves, AESH, affectations, créneaux) ont été mises à jour depuis l'extérieur :
         // on les recharge automatiquement, en conservant l'historique (journal, archives) et les préférences déjà enregistrés.
         const fresh = JSON.parse(JSON.stringify(seed));
