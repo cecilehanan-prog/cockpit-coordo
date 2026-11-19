@@ -2357,23 +2357,32 @@ window.supprimerPriseOcc = occId => window.retirerPriseOcc(occId);
 // la coordination garde la main : retirer un remplacement pris en ligne (la collègue ne vient pas) ou mettre quelqu'un d'autre
 const libPrise = p => `${frDate(p.date)} ${hh(p.debut)}–${hh(p.fin)}`;
 const numEleveCr = cr => { const e = cr && eleve(cr.eleveId), f = S.fiches || {}; return e && f.codes && f.codes[e.id] ? 'élève n° ' + f.codes[e.id] : ''; };
+// fenêtre d'information dans la page (les fenêtres alert/confirm du navigateur peuvent être bloquées, par ex. dans Safari : le bouton semblait alors ne rien faire)
+function infoModal(titre, texte) { modal(`<h2>${esc(titre)}</h2><p style="white-space:pre-line">${esc(texte)}</p>`, () => { }); $('#m-ok').textContent = 'OK'; const an = $('#mform .acts .btn:not(.primary)'); if (an) an.remove(); }
 async function libererEnLigne(p) {
   if (p.parCoordination || !serveurOK()) return true;
   try { await apiServeur('/api/admin/prises/retirer', { occId: p.occId }); return true; }
-  catch (x) { alert("Le créneau n'a pas pu être libéré dans l'appli de l'équipe : " + x.message + "\nVérifie internet et la Synchro, puis réessaie. Rien n'a été changé."); return false; }
+  catch (x) { infoModal('Remplacement non modifié', "Le créneau n'a pas pu être libéré dans l'appli de l'équipe : " + x.message + "\nVérifie internet et la Synchro, puis réessaie. Rien n'a été changé."); return false; }
 }
-window.retirerPriseOcc = async occId => {
-  const p = (S.prisesOcc || []).find(x => x.occId === occId); if (!p) return;
-  const r = aesh(p.remplacantId), ab = aesh(p.absentId);
-  if (!confirm(`Retirer ce remplacement ?\n${libPrise(p)} : ${r ? r.nom : '?'} ne remplace plus ${ab ? ab.nom : '?'}.\n\nLe créneau redevient libre dans l'appli de l'équipe (s'il n'a pas encore commencé) et sort des compteurs de ${r ? r.nom.split(' ')[0] : 'la collègue'}.`)) return;
-  if (!(await libererEnLigne(p))) return;
-  S.prisesOcc = S.prisesOcc.filter(x => x.occId !== occId); S.prisesVues = (S.prisesVues || []).filter(x => x !== occId);
-  commit('aesh', `Remplacement retiré par la coordination : ${libPrise(p)}, ${r ? r.nom : '?'} ne remplace plus ${ab ? ab.nom : '?'}`);
-  if (serveurOK()) publierAuto();
-  if (r && r.email && confirm(`Prévenir ${r.nom} par mail ?`)) location.href = `mailto:${r.email}?subject=${encodeURIComponent('Remplacement du ' + frDate(p.date) + ' annulé')}&body=${encodeURIComponent(`Bonjour ${r.nom.split(' ')[0]},\n\nTu n'as plus à assurer le remplacement du ${libPrise(p)}. Merci !\n\nCécile`)}`;
+window.retirerPriseOcc = occId => {
+  const p = (S.prisesOcc || []).find(x => x.occId === occId); if (!p) { toast('Ce remplacement a déjà été retiré.'); render(); return; }
+  const r = aesh(p.remplacantId), ab = aesh(p.absentId), prenom = r ? r.nom.split(' ')[0] : 'la collègue';
+  // confirmation dans une fenêtre de la page, et non par confirm() du navigateur (bloqué chez Hanan : le bouton ne réagissait pas)
+  modal(`<h2>Retirer ce remplacement ?</h2><p style="margin-top:0"><b>${esc(libPrise(p))}</b> : ${esc(r ? r.nom : '?')} ne remplace plus ${esc(ab ? ab.nom : '?')}.</p>
+    <p class="small muted">Le créneau redevient libre dans l'appli de l'équipe (s'il n'a pas encore commencé) et sort des compteurs de ${esc(prenom)}. Les autres dates de ce créneau ne changent pas.</p>
+    ${r && r.email ? `<label class="f wide" style="flex-direction:row;gap:8px;align-items:center"><input type="checkbox" name="mail" style="width:auto"> Ouvrir un mail pour prévenir ${esc(prenom)}</label>` : ''}`, d => {
+    (async () => {
+      if (!(await libererEnLigne(p))) return;
+      S.prisesOcc = (S.prisesOcc || []).filter(x => x.occId !== occId); S.prisesVues = (S.prisesVues || []).filter(x => x !== occId);
+      commit('aesh', `Remplacement retiré par la coordination : ${libPrise(p)}, ${r ? r.nom : '?'} ne remplace plus ${ab ? ab.nom : '?'}`);
+      toast('Remplacement retiré'); if (serveurOK()) publierAuto();
+      if (d.mail && r && r.email) location.href = `mailto:${r.email}?subject=${encodeURIComponent('Remplacement du ' + frDate(p.date) + ' annulé')}&body=${encodeURIComponent(`Bonjour ${prenom},\n\nTu n'as plus à assurer le remplacement du ${libPrise(p)}. Merci !\n\nCécile`)}`;
+    })();
+  });
+  $('#m-ok').textContent = 'Retirer';
 };
 window.changerPriseOcc = occId => {
-  const p = (S.prisesOcc || []).find(x => x.occId === occId); if (!p) return;
+  const p = (S.prisesOcc || []).find(x => x.occId === occId); if (!p) { toast('Ce remplacement a déjà été retiré.'); render(); return; }
   const r = aesh(p.remplacantId), ab = aesh(p.absentId), cr = S.creneaux.find(c => c.id === p.creneauId);
   const cands = (cr ? candidatsRemplacement(cr) : sortAesh(S.aesh.filter(a => !absente(a))).map(a => ({ id: a.id, label: a.nom }))).filter(c => c.id !== p.remplacantId);
   modal(`<h2>Mettre quelqu'un d'autre</h2><p class="small muted" style="margin-top:0">${libPrise(p)} · absence de ${esc(ab ? ab.nom : '?')}. Aujourd'hui : <b>${esc(r ? r.nom : '?')}</b>.</p><div class="form-grid">
@@ -2386,7 +2395,7 @@ window.changerPriseOcc = occId => {
       const n = aesh(d.aid), i = S.prisesOcc.findIndex(x => x.occId === occId);
       const rec = { occId, creneauId: p.creneauId, absentId: p.absentId, date: p.date, debut: p.debut, fin: p.fin, remplacantId: d.aid, priseLe: maintenantLocal(), parCoordination: true };
       if (i >= 0) S.prisesOcc[i] = rec; else S.prisesOcc.push(rec);
-      commit('aesh', `Remplacement modifié par la coordination : ${libPrise(p)}, ${n ? n.nom : '?'} à la place de ${r ? r.nom : '?'} (absence de ${ab ? ab.nom : '?'})`);
+      toast('Remplacement modifié'); commit('aesh', `Remplacement modifié par la coordination : ${libPrise(p)}, ${n ? n.nom : '?'} à la place de ${r ? r.nom : '?'} (absence de ${ab ? ab.nom : '?'})`);
       if (serveurOK()) publierAuto();
       if (d.mail && n) { const to = [n.email, r && r.email].filter(Boolean).join(','), num = numEleveCr(cr), mat = cr ? sansNomEleve(cr.matiere) : '';
         location.href = `mailto:${to}?subject=${encodeURIComponent('Changement de remplacement le ' + frDate(p.date))}&body=${encodeURIComponent(`Bonjour,\n\nChangement pour le remplacement du ${libPrise(p)}${mat ? ' (' + mat + ')' : ''}${num ? ', ' + num : ''} :\n- ${n.nom.split(' ')[0]} assure ce créneau,\n- ${r ? r.nom.split(' ')[0] : ''} n'y va plus.\n\nMerci à vous deux !\n\nCécile`)}`; }
