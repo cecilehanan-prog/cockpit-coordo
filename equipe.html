@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Équipe AESH</title><meta name="theme-color" content="#37667F">
+<meta name="apple-mobile-web-app-title" content="Équipe AESH">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png"><link rel="icon" type="image/png" href="icons/icone-32.png">
+<style>
+:root{--bleu:#37667F;--fond:#F3F6F8;--texte:#1F2A33;--gris:#5C6B77;--ligne:#D5DDE3;--carte:#fff;--ok:#2E7D4F;--okf:#E6F4EC;--warn:#9A5B00;--warnf:#FFF3DC;--err:#C0392B}
+@media (prefers-color-scheme:dark){:root{--fond:#12181D;--texte:#E7EDF1;--gris:#9DAAB4;--ligne:#2A353D;--carte:#1A2228;--ok:#6CC28F;--okf:#183526;--warn:#F2B65A;--warnf:#3A2C12;--err:#F07B6E}}
+*{box-sizing:border-box}body{margin:0;padding-bottom:90px;background:var(--fond);color:var(--texte);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{background:var(--bleu);color:#fff;padding:14px 16px;font-weight:650;font-size:17px;position:sticky;top:0;z-index:2}
+main{max-width:600px;margin:0 auto;padding:16px}
+h2{font-size:15px;margin:22px 0 8px;color:var(--gris);text-transform:uppercase;letter-spacing:.03em}h2:first-child{margin-top:4px}
+.carte{background:var(--carte);border:1px solid var(--ligne);border-radius:14px;padding:14px 16px;margin-bottom:10px}
+.carte.moi{border-color:var(--ok);background:var(--okf)}.carte.pris{opacity:.6}
+.t{font-weight:650;font-size:17px}.gris{color:var(--gris);font-size:14px}.err{color:var(--err);font-weight:600}
+.alerte{background:var(--warnf);color:var(--warn);border-radius:8px;padding:6px 10px;font-size:14px;margin-top:8px}
+.etat{font-weight:650;color:var(--ok);margin-top:8px}
+button{font:inherit;font-size:16px;padding:10px 16px;border:0;border-radius:10px;background:var(--bleu);color:#fff;font-weight:600;margin-top:10px}
+button.second{background:transparent;color:var(--bleu);border:1px solid var(--bleu)}button:disabled{opacity:.5}
+.note{white-space:pre-wrap;background:var(--fond);border-radius:8px;padding:10px;margin-top:8px;font-size:15px}
+.vide{color:var(--gris);text-align:center;padding:18px}
+.fiche{display:inline-block;margin-top:6px;color:var(--bleu);font-weight:600;text-decoration:none}@media (prefers-color-scheme:dark){.fiche{color:#7FB2CF}}
+</style></head><body><header id="h">Équipe AESH</header><main id="m"><div class="carte gris">Chargement…</div></main>
+<script src="js/sync-config.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+const M = document.getElementById('m'), P = new URLSearchParams(location.hash.slice(1)), E = P.get('e'), CLE = P.get('p');
+const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const p2 = n => String(n).padStart(2, '0');
+const maintenant = () => { const d = new Date(); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+const JOURS = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+const jour = iso => JOURS[new Date(iso + 'T12:00').getDay()] + ' ' + iso.slice(8, 10) + '/' + iso.slice(5, 7);
+const hh = t => String(t || '').replace(':', 'h');
+const MEM = 'equipe-aesh-envoyes-' + CLE;
+let moi = null, prises = {}, envoyes = {}; try { envoyes = JSON.parse(localStorage.getItem(MEM)) || {}; } catch (e) {}
+const garder = () => { try { localStorage.setItem(MEM, JSON.stringify(envoyes)); } catch (e) {} };
+let db, R;
+
+function lundi(iso) { const d = new Date(iso + 'T12:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; }
+function occupee(date, debut, fin) {
+  const j = new Date(date + 'T12:00').getDay(), q = (moi.quinzaines || {})[lundi(date)];
+  return (moi.occupations || []).some(o => o.jour === j && (!o.groupe || !q || o.groupe === q) && o.debut < fin && debut < o.fin);
+}
+const commence = (date, debut) => `${date}T${debut}` <= maintenant();
+// désistement verrouillé 4 h avant le cours (le temps de trouver une remplaçante)
+const verrou = (date, debut) => { const d = new Date(`${date}T${debut}`); d.setHours(d.getHours() - 4); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}` <= maintenant(); };
+const VERROU = '<div class="gris" style="margin-top:6px">Moins de 4 heures avant le cours : si tu ne peux plus venir, appelle la coordinatrice.</div>';
+const horodatage = () => { const d = new Date(); return maintenant() + ':' + p2(d.getSeconds()) + '.' + String(d.getMilliseconds()).padStart(3, '0'); }; // ordre exact des réponses
+
+function afficher() {
+  if (!moi) return;
+  document.getElementById('h').textContent = 'Bonjour ' + (moi.nom || '').split(' ')[0];
+  const C = (moi.creneaux || []).filter(c => !commence(c.date, c.fin)).sort((a, b) => (a.date + a.debut).localeCompare(b.date + b.debut));
+  const D = (moi.demandes || []).slice().sort((a, b) => (a.date + a.debut).localeCompare(b.date + b.debut));
+  const carteC = c => {
+    const p = prises[c.id], pris = p && !p.annulee, aMoi = pris && p.aeshId === moi.aeshId, debute = commence(c.date, c.debut), occ = !aMoi && occupee(c.date, c.debut, c.fin);
+    return `<div class="carte ${aMoi ? 'moi' : pris ? 'pris' : ''}"><div class="t">${jour(c.date)} · ${hh(c.debut)}–${hh(c.fin)}</div>
+      <div>${c.eleve ? `Élève n° <b>${esc(c.eleve)}</b>` : (c.classe ? 'Classe ' + esc(c.classe) : 'Élève')}${c.matiere ? ' · ' + esc(c.matiere) : ''}</div>
+      ${c.fiche ? `<a class="fiche" href="${esc(c.fiche)}" target="_blank" rel="noopener">Voir la fiche de l'élève ›</a>` : ''}
+      <div class="gris">${c.site ? esc(c.site) + ' · ' : ''}remplace ${esc(c.absent)}${c.semaine ? ' · semaine ' + esc(c.semaine) : ''}</div>
+      ${aMoi ? `<div class="etat">✓ Tu prends ce créneau</div>${debute ? '' : verrou(c.date, c.debut) ? VERROU : `<button class="second" onclick="agir('annule','${c.id}')">Je ne peux plus</button>`}`
+        : pris ? `<div class="gris" style="margin-top:6px">Pris par ${esc(p.nom || 'une collègue')}</div>`
+        : debute ? '<div class="gris" style="margin-top:6px">Le cours a commencé</div>'
+        : `${occ ? '<div class="alerte">Attention : tu as déjà un accompagnement à cette heure.</div>' : ''}<button onclick="agir('prise','${c.id}')">Je prends ce créneau</button>`}</div>`;
+  };
+  const carteD = d => {
+    const k = 'd' + d.id, pos = envoyes[k] ? envoyes[k] === 'candidat' : d.positionne, occ = occupee(d.date, d.debut, d.fin);
+    return `<div class="carte ${d.validee ? 'moi' : ''}"><div class="t">${jour(d.date)} · ${hh(d.debut)}–${hh(d.fin)}</div>
+      <div>${esc(d.type)} · classe ${esc(d.classe)} · salle ${esc(d.salle)}</div>${d.prof ? `<div class="gris">Demandé par ${esc(d.prof)}</div>` : ''}
+      ${d.validee && (envoyes[k] ? envoyes[k] === 'retrait' : d.desiste) ? `<div class="alerte">Tu t'es désistée : la coordinatrice est prévenue.</div>${commence(d.date, d.debut) ? '' : `<button onclick="candidat('candidat','${d.id}')">Finalement, je peux venir</button>`}`
+        : d.validee ? `<div class="etat">✓ C'est toi qui accompagnes</div>${commence(d.date, d.debut) ? '' : verrou(d.date, d.debut) ? VERROU : `<button class="second" onclick="candidat('retrait','${d.id}')">Je ne peux plus venir</button>`}${d.note ? `<div class="note"><b>Élève et aides</b> (effacé le lendemain)\n${esc(d.note)}</div>` : '<div class="gris" style="margin-top:6px">La coordinatrice t\'enverra les infos sur l\'élève.</div>'}`
+        : pos ? `<div class="etat">✓ Tu es positionnée</div><div class="gris">La coordinatrice choisit et te prévient par mail.</div><button class="second" onclick="candidat('retrait','${d.id}')">Retirer ma proposition</button>`
+        : `${occ ? '<div class="alerte">Attention : tu as déjà un accompagnement à cette heure.</div>' : ''}<button onclick="candidat('candidat','${d.id}')">Je suis disponible</button>`}</div>`;
+  };
+  M.innerHTML = `<h2>Créneaux à prendre</h2>${C.length ? C.map(carteC).join('') : '<div class="carte vide">Aucun créneau à prendre pour le moment.</div>'}
+    <h2>Demandes d'accompagnement (DS, évaluations)</h2>${D.length ? D.map(carteD).join('') : '<div class="carte vide">Aucune demande pour toi en ce moment.</div>'}
+    <p class="gris" style="text-align:center;margin-top:18px">Mis à jour ${moi.maj ? 'le ' + new Date(moi.maj).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}. Cette page est personnelle : ne partage pas ton lien.</p>`;
+}
+
+async function agir(type, occId) {
+  const c = (moi.creneaux || []).find(x => x.id === occId); if (!c) return;
+  if (type === 'annule' && verrou(c.date, c.debut)) { alert('Moins de 4 heures avant le cours : appelle la coordinatrice.'); return; }
+  if (type === 'annule' && !confirm('Tu ne peux plus prendre ce créneau ? Il redevient libre pour les collègues.')) return;
+  const rRef = R.collection('reponses').doc(), pRef = R.collection('prises').doc(occId), le = horodatage();
+  const b = db.batch();
+  b.set(rRef, { p: CLE, aeshId: moi.aeshId, type, occId, creneauId: c.creneauId, date: c.date, debut: c.debut, fin: c.fin, le });
+  b.set(pRef, { aeshId: moi.aeshId, nom: moi.nom, le, annulee: type === 'annule', rid: rRef.id, creneauId: c.creneauId, date: c.date, debut: c.debut, fin: c.fin });
+  try { await b.commit(); }
+  catch (e) { alert(type === 'prise' ? 'Trop tard : une collègue vient de prendre ce créneau.' : "Ça n'a pas marché. Vérifie ta connexion internet."); }
+}
+async function candidat(type, demandeId) {
+  const dv = (moi.demandes || []).find(x => x.id === demandeId) || {};
+  if (type === 'retrait' && dv.validee && verrou(dv.date, dv.debut)) { alert('Moins de 4 heures avant le cours : appelle la coordinatrice.'); return; }
+  if (type === 'retrait' && dv.validee && !confirm('Tu ne peux plus venir ? La coordinatrice sera prévenue pour trouver une autre AESH.')) return;
+  try { await R.collection('reponses').add({ p: CLE, aeshId: moi.aeshId, type, demandeId, le: horodatage() }); envoyes['d' + demandeId] = type; garder(); afficher(); }
+  catch (e) { alert("Ça n'a pas marché. Vérifie ta connexion internet."); }
+}
+
+if (!E || !CLE || !window.COCKPIT_FIREBASE || !window.firebase) M.innerHTML = '<div class="carte"><p class="err">Ce lien est incomplet ou la page n\'a pas pu se charger.</p><p class="gris">Vérifie ta connexion internet, ou demande ton lien à la coordinatrice.</p></div>';
+else {
+  firebase.initializeApp(window.COCKPIT_FIREBASE); db = firebase.firestore(); R = db.collection('enligne').doc(E);
+  R.collection('membres').doc(CLE).onSnapshot(s => {
+    if (!s.exists) { M.innerHTML = '<div class="carte"><p class="err">Ce lien ne marche plus.</p><p class="gris">Demande ton nouveau lien à la coordinatrice.</p></div>'; return; }
+    moi = s.data(); Object.keys(envoyes).forEach(k => { const d = (moi.demandes || []).find(x => 'd' + x.id === k); if (!d || d.positionne === (envoyes[k] === 'candidat')) delete envoyes[k]; }); garder(); afficher();
+  }, () => { M.innerHTML = '<div class="carte"><p class="err">Ce lien ne marche pas.</p><p class="gris">Demande ton lien à la coordinatrice.</p></div>'; });
+  R.collection('prises').onSnapshot(q => { prises = {}; q.forEach(d => { prises[d.id] = d.data(); }); afficher(); }, () => {});
+  setInterval(afficher, 60000);
+}
+</script></body></html>

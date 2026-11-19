@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Demande d'AESH</title><meta name="theme-color" content="#37667F">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png"><link rel="icon" type="image/png" href="icons/icone-32.png">
+<style>
+:root{--bleu:#37667F;--fond:#F3F6F8;--texte:#1F2A33;--gris:#5C6B77;--ligne:#D5DDE3;--carte:#fff;--ok:#2E7D4F;--err:#C0392B}
+@media (prefers-color-scheme:dark){:root{--fond:#12181D;--texte:#E7EDF1;--gris:#9DAAB4;--ligne:#2A353D;--carte:#1A2228;--ok:#6CC28F;--err:#F07B6E}}
+*{box-sizing:border-box}body{margin:0;padding-bottom:90px;background:var(--fond);color:var(--texte);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{background:var(--bleu);color:#fff;padding:14px 16px;font-weight:650;font-size:17px}
+main{max-width:560px;margin:0 auto;padding:16px}
+.carte{background:var(--carte);border:1px solid var(--ligne);border-radius:14px;padding:16px;margin-bottom:14px}
+label{display:block;font-weight:600;font-size:14px;margin:12px 0 4px}label:first-child{margin-top:0}
+input,select,textarea{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--ligne);border-radius:10px;background:var(--carte);color:var(--texte)}
+.ligne{display:flex;gap:10px}.ligne>div{flex:1;min-width:0}
+.coche{display:flex;gap:10px;align-items:flex-start;font-weight:400;margin-top:14px}.coche input{width:auto;margin-top:4px}
+button{margin-top:16px;width:100%;font:inherit;font-size:17px;padding:13px;border:0;border-radius:10px;background:var(--bleu);color:#fff;font-weight:600}
+button:disabled{opacity:.6}.gris{color:var(--gris);font-size:14px}.err{color:var(--err);font-weight:600}.ok{color:var(--ok);font-weight:650;font-size:18px}
+</style></head><body><header>Demander une AESH · DS ou évaluation</header><main id="m"><div class="carte gris">Chargement…</div></main>
+<script src="js/sync-config.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+const M = document.getElementById('m'), P = new URLSearchParams(location.hash.slice(1));
+const E = P.get('e'), K = P.get('k'), MEM = 'demande-aesh-prof';
+const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const lire = () => { try { return JSON.parse(localStorage.getItem(MEM)) || {}; } catch (e) { return {}; } };
+const p2 = n => String(n).padStart(2, '0'), d0 = new Date(), auj = `${d0.getFullYear()}-${p2(d0.getMonth() + 1)}-${p2(d0.getDate())}`;
+function formulaire(msg) {
+  const m = lire();
+  M.innerHTML = `<div class="carte"><p class="gris" style="margin-top:0">La coordinatrice AESH reçoit votre demande et vous répond par mail.</p>${msg ? '<p class="err">' + esc(msg) + '</p>' : ''}
+  <form id="f"><label for="nom">Vos nom et prénom</label><input id="nom" required maxlength="80" value="${esc(m.nom || '')}" autocomplete="name">
+  <label for="mail">Votre adresse e-mail</label><input id="mail" type="email" required maxlength="120" value="${esc(m.mail || '')}" autocomplete="email">
+  <label for="type">Pour quoi ?</label><select id="type"><option>Devoir surveillé</option><option>Évaluation</option><option>Examen blanc</option><option>Sortie</option><option>Autre</option></select>
+  <label for="date">Date</label><input id="date" type="date" required min="${auj}">
+  <div class="ligne"><div><label for="debut">Début</label><input id="debut" type="time" required step="300"></div><div><label for="fin">Fin</label><input id="fin" type="time" required step="300"></div></div>
+  <div class="ligne"><div><label for="classe">Classe</label><input id="classe" required maxlength="40" placeholder="4e 2"></div><div><label for="salle">Salle</label><input id="salle" required maxlength="40" placeholder="B204"></div></div>
+  <label class="coche"><input type="checkbox" id="notifie"> <span>C'est pour un élève qui a une AESH (notification MDPH)</span></label>
+  <label for="com">Précisions (facultatif)</label><textarea id="com" rows="3" maxlength="500" placeholder="Sans nom d'élève, merci"></textarea>
+  <button id="go">Envoyer la demande</button></form></div>`;
+  document.getElementById('f').onsubmit = envoyer;
+}
+async function envoyer(ev) {
+  ev.preventDefault(); const v = id => document.getElementById(id).value.trim(), b = document.getElementById('go');
+  if (v('fin') <= v('debut')) { alert("L'heure de fin doit être après l'heure de début."); return; }
+  b.disabled = true; b.textContent = 'Envoi…';
+  const d = { k: K, statut: 'nouvelle', profNom: v('nom'), profEmail: v('mail'), type: v('type'), date: v('date'), debut: v('debut'), fin: v('fin'), classe: v('classe'), salle: v('salle'), notifie: document.getElementById('notifie').checked, commentaire: v('com'), creeLe: new Date().toISOString() };
+  try {
+    await firebase.firestore().collection('enligne').doc(E).collection('demandes').add(d);
+    try { localStorage.setItem(MEM, JSON.stringify({ nom: d.profNom, mail: d.profEmail })); } catch (e) {}
+    M.innerHTML = `<div class="carte"><p class="ok">Demande envoyée ✓</p><p>${esc(d.type)} le ${d.date.split('-').reverse().join('/')}, de ${d.debut.replace(':', 'h')} à ${d.fin.replace(':', 'h')}, classe ${esc(d.classe)}, salle ${esc(d.salle)}.</p><p class="gris">Vous recevrez la réponse à ${esc(d.profEmail)}.</p><button onclick="formulaire('')">Faire une autre demande</button></div>`;
+  } catch (e) { b.disabled = false; b.textContent = 'Envoyer la demande'; alert("La demande n'est pas partie. Vérifiez la connexion internet, ou demandez un nouveau lien à la coordinatrice."); }
+}
+if (!E || !K || !window.COCKPIT_FIREBASE || !window.firebase) M.innerHTML = '<div class="carte"><p class="err">Ce lien est incomplet ou la page n\'a pas pu se charger.</p><p class="gris">Vérifiez la connexion internet, ou demandez le lien à la coordinatrice AESH.</p></div>';
+else { firebase.initializeApp(window.COCKPIT_FIREBASE); formulaire(''); }
+</script></body></html>
