@@ -474,7 +474,7 @@ function load() {
         fresh.journal = saved.journal || fresh.journal;
         fresh.archives = saved.archives || fresh.archives;
         fresh.segmentsRempl = saved.segmentsRempl || fresh.segmentsRempl;
-        fresh.prisesOcc = saved.prisesOcc || fresh.prisesOcc;
+        fresh.prisesOcc = saved.prisesOcc || fresh.prisesOcc; fresh.prisesRetirees = saved.prisesRetirees || {};
         fresh.pubApercu = saved.pubApercu || false; fresh.serveur = saved.serveur || fresh.serveur; fresh.evals = saved.evals || fresh.evals; fresh.evalsVues = saved.evalsVues || fresh.evalsVues; if (saved.questions) { fresh.questions = saved.questions; fresh.questionsAjoutees = saved.questionsAjoutees; }
         fresh.affConfirmees = saved.affConfirmees || fresh.affConfirmees; fresh.essVus = saved.essVus || fresh.essVus; fresh.prisesVues = saved.prisesVues || fresh.prisesVues; fresh.alertesAbs = saved.alertesAbs || fresh.alertesAbs; fresh.essRappels = saved.essRappels || fresh.essRappels; fresh.essNotif = saved.essNotif || fresh.essNotif; fresh.conseils = saved.conseils || fresh.conseils; fresh.conseilsVus = saved.conseilsVus || fresh.conseilsVus; fresh.conseilsNotif = saved.conseilsNotif || fresh.conseilsNotif; // rappels d'ESS déjà envoyés
         fresh.absences = saved.absences || fresh.absences; // historique des absences : saisie de l'appli, conservée
@@ -504,7 +504,7 @@ function migrate(s) {
   for (const k of ['aesh', 'eleves', 'classes', 'affectations', 'creneaux', 'journal', 'archives']) s[k] = s[k] || [];
   s.aesh.forEach(a => { a.statut = a.statut || 'Actif'; a.heuresAutres = a.heuresAutres ?? null; a.email = a.email || ''; a.hs = a.hs || { autorise: 0, depuis: '', mouvements: [] }; if (a.dispositif === undefined) a.dispositif = /SEGPA/i.test(a.remarques || '') ? 'SEGPA' : /ULIS/i.test(a.remarques || '') ? 'ULIS' : ''; });
   s.absences = s.absences || [];
-  s.prisesOcc = s.prisesOcc || []; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
+  s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
   s.questions = s.questions || [];
   // questions ajoutées par Claude : chaque question n'est ajoutée qu'une fois (suivi dans questionsAjoutees), ce que Cécile supprime ou coche n'est pas recréé
   s.questionsAjoutees = s.questionsAjoutees || ['q1'];
@@ -1060,16 +1060,23 @@ window.exporterACouvrir = () => {
   toast(`${pub.occurrences.length} créneaux à venir exportés`);
 };
 // Prises faites dans l'appli en ligne (fichier « prises-remplacements.json » téléchargé dans la rubrique Coordination)
-function integrerPrises(prises) {
-  let ajout = 0, retrait = 0, rejet = 0;
+function integrerPrises(prises, complet) {
+  let ajout = 0, retrait = 0, rejet = 0; const RT = S.prisesRetirees = S.prisesRetirees || {};
+  if (complet) { // liste complète lue dans l'appli en ligne : un créneau à venir qui n'y est plus (effacé en ligne) sort aussi du cockpit
+    const ids = new Set((prises || []).map(p => p.occId)), auj = aujourdhui();
+    S.prisesOcc = S.prisesOcc.filter(x => { if (x.parCoordination || x.date < auj || ids.has(x.occId)) return true; retrait++; return false; });
+    Object.keys(RT).forEach(id => { if (RT[id] && !RT[id].aLiberer && (RT[id].date || id.split('@')[1] || '') < auj) delete RT[id]; }); // date passée : plus besoin de s'en souvenir
+  }
   (prises || []).forEach(p => {
+    const t = RT[p.occId]; if (t && !p.annulee && (!p.priseLe || !t.priseLe || p.priseLe <= t.priseLe)) return; // retiré par la coordination : ne revient pas (sauf nouvelle prise faite après)
+    if (t && !p.annulee) delete RT[p.occId];
     const i = S.prisesOcc.findIndex(x => x.occId === p.occId);
     if (i >= 0 && S.prisesOcc[i].parCoordination) return; // la décision de la coordination prime sur l'appli en ligne
     if (p.annulee) { if (i >= 0) { alerteAbs('annul-' + p.occId + '-' + Date.now(), 'annulation', S.prisesOcc[i]); S.prisesOcc.splice(i, 1); retrait++; } return; }
     // verrou du passé : une prise de l'équipe enregistrée après le début du cours n'est pas retenue ; une décision de la coordination l'est toujours
     if (!p.priseLe || (!p.parCoordination && p.priseLe >= `${p.date}T${p.debut}`)) { rejet++; return; }
     const cr = S.creneaux.find(c => c.id === p.creneauId), rec = { occId: p.occId, creneauId: p.creneauId, absentId: cr ? cr.aeshId : null, date: p.date, debut: p.debut, fin: p.fin, remplacantId: p.aeshId, priseLe: p.priseLe, parCoordination: !!p.parCoordination };
-    if (i >= 0) S.prisesOcc[i] = rec; else { S.prisesOcc.push(rec); ajout++; }
+    if (i >= 0) { if (S.prisesOcc[i].remplacantId !== rec.remplacantId) ajout++; S.prisesOcc[i] = rec; } else { S.prisesOcc.push(rec); ajout++; }
   });
   return { ajout, retrait, rejet };
 }
@@ -1082,7 +1089,8 @@ window.importerPrises = async ev => {
 window.prisesActualiser = async (silencieux = false) => {
   if (!serveurOK()) return false;
   try {
-    const j = await apiServeur('/api/admin/prises'), avant = new Set(S.prisesOcc.map(p => p.occId)), r = integrerPrises(j.prises); window.prisesEtat = { ok: true, le: new Date().toTimeString().slice(0, 5), n: (j.prises || []).filter(p => !p.annulee).length };
+    await relancerLiberations();
+    const j = await apiServeur('/api/admin/prises'), avant = new Set(S.prisesOcc.map(p => p.occId)), r = integrerPrises(j.prises, true); window.prisesEtat = { ok: true, le: new Date().toTimeString().slice(0, 5), n: (j.prises || []).filter(p => !p.annulee).length };
     if (S.prisesVues === null) S.prisesVues = [...avant]; // première synchro : on ne notifie pas l'existant
     const neuves = S.prisesOcc.filter(p => !avant.has(p.occId));
     if (r.ajout || r.retrait) { save(); majCompteurAbsences(); if (/^#\/(absences|aesh\/)/.test(location.hash)) render(); else rafraichirBandeauRempl(); }
@@ -2047,7 +2055,11 @@ window.setCalLigne = (liste, i, k, v) => { S.calendrier[liste][i][k] = v; commit
 window.addCalLigne = liste => { S.calendrier[liste].push(liste === 'vacances' ? { nom: '', debut: '', fin: '' } : { nom: '', date: '' }); commit('param', `Calendrier : ligne ajoutée (${liste})`); };
 window.delCalLigne = (liste, i) => { S.calendrier[liste].splice(i, 1); commit('param', `Calendrier : ligne retirée (${liste})`); };
 window.nouvelleAnneeCalendrier = () => { if (!confirm('Vider les vacances et les jours fériés pour préparer la nouvelle année scolaire ? (les créneaux ne sont pas touchés)')) return; const an = prompt('Nouvelle année scolaire (ex. 2027-2028) :', ''); if (an === null) return; S.calendrier = { annee: an || '', refLundi: '', refQ: 'Q1', vacances: [], feries: [] }; commit('param', 'Calendrier : nouvelle année préparée'); };
-window.cockpitSync = { cle: KEY, appliquer: d => { S = migrate(d); localStorage.setItem(KEY, JSON.stringify(S)); verifierRetours(); render(); } }; // retours d'absence aussi vérifiés après réception // synchro chiffrée (js/sync.js)
+// Synchro : un remplacement retiré sur cet appareil ne revient pas avec les données (plus anciennes) d'un autre appareil
+function garderRetraits(d) { const loc = (S && S.prisesRetirees) || {}, RT = d.prisesRetirees = d.prisesRetirees || {};
+  Object.keys(loc).forEach(id => { if (!RT[id] || (loc[id].le || '') > (RT[id].le || '')) RT[id] = loc[id]; });
+  d.prisesOcc = (d.prisesOcc || []).filter(x => { const t = RT[x.occId]; return !t || (x.priseLe || '') > (t.priseLe || ''); }); return d; }
+window.cockpitSync = { cle: KEY, appliquer: d => { S = migrate(garderRetraits(d)); localStorage.setItem(KEY, JSON.stringify(S)); verifierRetours(); render(); } }; // retours d'absence aussi vérifiés après réception // synchro chiffrée (js/sync.js)
 window.exportJSON = () => dl(`cockpit-pas_${S.annee}_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S, null, 1));
 window.importJSON = file => { if (!file) return; const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); if (!d.eleves || !d.aesh) throw 0; S = migrate(d); log('import', `JSON importé : ${file.name}`); save(); render(); toast('Import réussi'); } catch { alert('Fichier JSON invalide.'); } }; r.readAsText(file); };
 /* ---- Mise à jour d'emplois du temps AESH depuis un fichier préparé (type « edt-aesh ») ----
@@ -2359,25 +2371,31 @@ const libPrise = p => `${frDate(p.date)} ${hh(p.debut)}–${hh(p.fin)}`;
 const numEleveCr = cr => { const e = cr && eleve(cr.eleveId), f = S.fiches || {}; return e && f.codes && f.codes[e.id] ? 'élève n° ' + f.codes[e.id] : ''; };
 // fenêtre d'information dans la page (les fenêtres alert/confirm du navigateur peuvent être bloquées, par ex. dans Safari : le bouton semblait alors ne rien faire)
 function infoModal(titre, texte) { modal(`<h2>${esc(titre)}</h2><p style="white-space:pre-line">${esc(texte)}</p>`, () => { }); $('#m-ok').textContent = 'OK'; const an = $('#mform .acts .btn:not(.primary)'); if (an) an.remove(); }
+// Le cockpit change tout de suite (la coordination décide) ; le créneau est libéré dans l'appli de l'équipe, avec nouvel essai automatique si ça échoue.
+function marquerRetire(p, aLiberer) { (S.prisesRetirees = S.prisesRetirees || {})[p.occId] = { priseLe: p.priseLe || '', date: p.date || '', le: maintenantLocal(), aLiberer: !!aLiberer }; }
 async function libererEnLigne(p) {
-  if (p.parCoordination || !serveurOK()) return true;
-  try { await apiServeur('/api/admin/prises/retirer', { occId: p.occId }); return true; }
-  catch (x) { infoModal('Remplacement non modifié', "Le créneau n'a pas pu être libéré dans l'appli de l'équipe : " + x.message + "\nVérifie internet et la Synchro, puis réessaie. Rien n'a été changé."); return false; }
+  if (!serveurOK()) return true;
+  try { await apiServeur('/api/admin/prises/retirer', { occId: p.occId }); const t = (S.prisesRetirees || {})[p.occId]; if (t) t.aLiberer = false; save(); return true; }
+  catch (x) { console.warn(x); return false; }
+}
+async function relancerLiberations() {
+  const RT = S.prisesRetirees || {}, ids = Object.keys(RT).filter(id => RT[id] && RT[id].aLiberer); let ok = true;
+  for (const id of ids) { try { await apiServeur('/api/admin/prises/retirer', { occId: id }); RT[id].aLiberer = false; } catch (x) { ok = false; } }
+  if (ids.length) save(); return ok;
 }
 window.retirerPriseOcc = occId => {
   const p = (S.prisesOcc || []).find(x => x.occId === occId); if (!p) { toast('Ce remplacement a déjà été retiré.'); render(); return; }
   const r = aesh(p.remplacantId), ab = aesh(p.absentId), prenom = r ? r.nom.split(' ')[0] : 'la collègue';
-  // confirmation dans une fenêtre de la page, et non par confirm() du navigateur (bloqué chez Hanan : le bouton ne réagissait pas)
   modal(`<h2>Retirer ce remplacement ?</h2><p style="margin-top:0"><b>${esc(libPrise(p))}</b> : ${esc(r ? r.nom : '?')} ne remplace plus ${esc(ab ? ab.nom : '?')}.</p>
     <p class="small muted">Le créneau redevient libre dans l'appli de l'équipe (s'il n'a pas encore commencé) et sort des compteurs de ${esc(prenom)}. Les autres dates de ce créneau ne changent pas.</p>
     ${r && r.email ? `<label class="f wide" style="flex-direction:row;gap:8px;align-items:center"><input type="checkbox" name="mail" style="width:auto"> Ouvrir un mail pour prévenir ${esc(prenom)}</label>` : ''}`, d => {
-    (async () => {
-      if (!(await libererEnLigne(p))) return;
-      S.prisesOcc = (S.prisesOcc || []).filter(x => x.occId !== occId); S.prisesVues = (S.prisesVues || []).filter(x => x !== occId);
-      commit('aesh', `Remplacement retiré par la coordination : ${libPrise(p)}, ${r ? r.nom : '?'} ne remplace plus ${ab ? ab.nom : '?'}`);
-      toast('Remplacement retiré'); if (serveurOK()) publierAuto();
-      if (d.mail && r && r.email) location.href = `mailto:${r.email}?subject=${encodeURIComponent('Remplacement du ' + frDate(p.date) + ' annulé')}&body=${encodeURIComponent(`Bonjour ${prenom},\n\nTu n'as plus à assurer le remplacement du ${libPrise(p)}. Merci !\n\nCécile`)}`;
-    })();
+    // 1. dans le cockpit, tout de suite (et il ne revient pas, même si l'appli en ligne ou un autre appareil l'a encore)
+    S.prisesOcc = (S.prisesOcc || []).filter(x => x.occId !== occId); S.prisesVues = (S.prisesVues || []).filter(x => x !== occId); marquerRetire(p, serveurOK());
+    commit('aesh', `Remplacement retiré par la coordination : ${libPrise(p)}, ${r ? r.nom : '?'} ne remplace plus ${ab ? ab.nom : '?'}`);
+    toast('Remplacement retiré');
+    // 2. dans l'appli de l'équipe
+    if (serveurOK()) (async () => { const ok = await libererEnLigne(p); publierAuto(); if (!ok) toast("Appli de l'équipe pas encore à jour : nouvel essai automatique dans 2 minutes"); })();
+    if (d.mail && r && r.email) location.href = `mailto:${r.email}?subject=${encodeURIComponent('Remplacement du ' + frDate(p.date) + ' annulé')}&body=${encodeURIComponent(`Bonjour ${prenom},\n\nTu n'as plus à assurer le remplacement du ${libPrise(p)}. Merci !\n\nCécile`)}`;
   });
   $('#m-ok').textContent = 'Retirer';
 };
@@ -2389,17 +2407,16 @@ window.changerPriseOcc = occId => {
     <label class="f wide">Nouvelle remplaçante<select name="aid" required><option value="">— choisir —</option>${cands.map(c => `<option value="${c.id}">${esc(c.label)}</option>`).join('')}</select></label>
     <label class="f wide" style="flex-direction:row;gap:8px;align-items:center"><input type="checkbox" name="mail" checked style="width:auto"> Ouvrir un mail pour prévenir les deux collègues</label></div>
     <p class="small muted">Le créneau sort de l'appli de l'équipe : plus personne ne peut le prendre en ligne.</p>`, d => {
-    if (!d.aid) { alert('Choisis la nouvelle remplaçante.'); return false; }
-    (async () => {
-      if (!(await libererEnLigne(p))) return;
-      const n = aesh(d.aid), i = S.prisesOcc.findIndex(x => x.occId === occId);
+    if (!d.aid) { toast('Choisis la nouvelle remplaçante.'); return false; }
+    {
+      const n = aesh(d.aid), i = S.prisesOcc.findIndex(x => x.occId === occId); if (!p.parCoordination) marquerRetire(p, serveurOK());
       const rec = { occId, creneauId: p.creneauId, absentId: p.absentId, date: p.date, debut: p.debut, fin: p.fin, remplacantId: d.aid, priseLe: maintenantLocal(), parCoordination: true };
       if (i >= 0) S.prisesOcc[i] = rec; else S.prisesOcc.push(rec);
       toast('Remplacement modifié'); commit('aesh', `Remplacement modifié par la coordination : ${libPrise(p)}, ${n ? n.nom : '?'} à la place de ${r ? r.nom : '?'} (absence de ${ab ? ab.nom : '?'})`);
-      if (serveurOK()) publierAuto();
+      if (serveurOK()) (async () => { if (!p.parCoordination) await libererEnLigne(p); publierAuto(); })();
       if (d.mail && n) { const to = [n.email, r && r.email].filter(Boolean).join(','), num = numEleveCr(cr), mat = cr ? sansNomEleve(cr.matiere) : '';
         location.href = `mailto:${to}?subject=${encodeURIComponent('Changement de remplacement le ' + frDate(p.date))}&body=${encodeURIComponent(`Bonjour,\n\nChangement pour le remplacement du ${libPrise(p)}${mat ? ' (' + mat + ')' : ''}${num ? ', ' + num : ''} :\n- ${n.nom.split(' ')[0]} assure ce créneau,\n- ${r ? r.nom.split(' ')[0] : ''} n'y va plus.\n\nMerci à vous deux !\n\nCécile`)}`; }
-    })();
+    }
   });
 };
 window.modifierAbsence = id => {
