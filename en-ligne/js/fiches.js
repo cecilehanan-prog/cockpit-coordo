@@ -192,6 +192,8 @@ const FE_CSS = `
 .fe-chips::-webkit-scrollbar{display:none}
 .fe-chip{flex:none;background:#1C2229;border:1px solid #333D48;color:#EEF1F4;border-radius:999px;padding:9px 18px;font-size:15px;font-weight:700;cursor:pointer}
 .fe-chip.on{background:#EEF1F4;color:#14181E;border-color:#EEF1F4}
+.fe-sep{flex:none;width:1px;align-self:stretch;background:#333D48;margin:4px 4px}
+.fe-chip.fe-tri.on{background:#7FB7E8;color:#14181E;border-color:#7FB7E8}
 .fe-l{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
 .fe-c{display:flex;gap:18px;align-items:flex-start;background:#1C2229;border:1px solid #2E3741;border-radius:16px;padding:18px 20px;cursor:pointer;text-align:left;color:inherit}
 .fe-c:hover,.fe-c:focus-visible{border-color:#5A7FA0;outline:none}
@@ -274,6 +276,9 @@ window.pageFichesAesh = function () {
 
 /* ---------- données d'un élève (locales, jamais publiées) ---------- */
 let fvFiltre = 'Tous';
+// classement de la liste (après « Sans numéro ») : ordre alphabétique ou numéro croissant ; retenu sur l'appareil
+const FV_TRIS = [['alpha', 'Ordre alphabétique'], ['num', 'Numéro croissant']];
+let fvTri = 'alpha'; try { if (localStorage.getItem('fv-tri') === 'num') fvTri = 'num'; } catch (x) {}
 const FV_FILTRES = ['Tous', 'Collège', 'Lycée Pro', 'ULIS', 'Lycée GT', 'SEGPA', 'Sans numéro'];
 const fvSite = e => { const d = (P().libDisp && P().libDisp(e)) || ''; return /ULIS/i.test(e.classe || '') || /ULIS/i.test(d) || e.site === 'ULIS' ? 'ULIS' : e.site === 'SEGPA' || /SEGPA/i.test(d) ? 'SEGPA' : e.site || ''; };
 function fvDonnees(e) {
@@ -311,23 +316,28 @@ function feDetail(e) {
     </div></div>`;
 }
 window.fichesVueFiltre = v => { fvFiltre = v; fichesVue(); };
+window.fichesVueTri = v => { fvTri = v === 'num' ? 'num' : 'alpha'; try { localStorage.setItem('fv-tri', fvTri); } catch (x) {} fichesVue(); };
 window.fichesVue = function () {
   const L = $('#fv-l'); if (!L || feOuvert) return;
   feQ = ($('#fv-q') || {}).value || ''; const q = feQ.trim().toLowerCase();
-  const tous = (S().eleves || []).filter(e => !e.archive).sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }) || (a.prenom || '').localeCompare(b.prenom || '', 'fr'));
+  const parNom = (a, b) => String(a.nom || '').trim().localeCompare(String(b.nom || '').trim(), 'fr', { sensitivity: 'base' }) || String(a.prenom || '').trim().localeCompare(String(b.prenom || '').trim(), 'fr', { sensitivity: 'base' });
+  const tous = (S().eleves || []).filter(e => !e.archive).sort(parNom);
   const D = new Map(tous.map(e => [e.id, fvDonnees(e)]));
+  if (fvTri === 'num') { const n = e => { const v = parseInt(D.get(e.id).num, 10); return isNaN(v) ? Infinity : v; }; tous.sort((a, b) => (n(a) - n(b)) || parNom(a, b)); }
   const ok = e => { const d = D.get(e.id);
     if (fvFiltre === 'Sans numéro' ? d.num : fvFiltre !== 'Tous' && d.site !== fvFiltre) return false;
     if (!q) return true;
     return [e.nom, e.prenom, e.classe, d.num, d.site, ...d.aesh].join(' ').toLowerCase().includes(q); };
   const E = tous.filter(ok);
-  $('#fv-f').innerHTML = FV_FILTRES.map(v => `<button class="fe-chip${v === fvFiltre ? ' on' : ''}" onclick="fichesVueFiltre('${v}')">${v}</button>`).join('');
+  $('#fv-f').innerHTML = FV_FILTRES.map(v => `<button class="fe-chip${v === fvFiltre ? ' on' : ''}" onclick="fichesVueFiltre('${v}')">${v}</button>`).join('')
+    + '<span class="fe-sep" aria-hidden="true"></span>'
+    + FV_TRIS.map(([k, t]) => `<button class="fe-chip fe-tri${k === fvTri ? ' on' : ''}" onclick="fichesVueTri('${k}')">${t}</button>`).join('');
   L.innerHTML = E.map(e => { const d = D.get(e.id);
     return `<div class="fe-c" role="button" tabindex="0" data-id="${esc(e.id)}" onclick="fichesOuvrir(this.dataset.id)" onkeydown="if(event.key==='Enter')fichesOuvrir(this.dataset.id)">
       <div class="fe-av">${FE_AVATAR}</div>
       <div style="min-width:0;flex:1">
         <div class="fe-n">${feNom(e)}</div>
-        <div class="fe-cl">${esc(e.classe || '')}${e.site ? ' · ' + esc(e.site) : ''}</div>
+        <div class="fe-cl">${fvTri === 'num' && d.num ? `<b>n° ${esc(d.num)}</b> · ` : ''}${esc(e.classe || '')}${e.site ? ' · ' + esc(e.site) : ''}</div>
         <div class="fe-ae">AESH : <b>${d.aesh.length ? d.aesh.map(esc).join(', ') : '—'}</b></div>
         ${feTagsHtml(d.troubles)}
       </div></div>`; }).join('') || '<div class="fe-vide">Aucun élève ne correspond.</div>';
