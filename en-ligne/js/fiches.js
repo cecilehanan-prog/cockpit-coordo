@@ -32,15 +32,16 @@ function etat() {
 const sauver = () => P().save();
 const urlFiche = (f, code) => f.site.replace(/\/?$/, '/') + '#' + code;
 
-// élèves concernés : non archivés, avec au moins un créneau d'accompagnement
+// élèves concernés (20/11) : élèves notifiés ou accompagnés (AESH, créneau), même sans créneau encore saisi
 function elevesConcernes() {
-  const s = S(), avec = new Set((s.creneaux || []).map(c => c.eleveId));
-  return (s.eleves || []).filter(e => !e.archive && avec.has(e.id)).sort((a, b) => (a.classe || '').localeCompare(b.classe || '', 'fr', { numeric: true }) || (a.nom || '').localeCompare(b.nom || '', 'fr'));
+  const s = S();
+  return (s.eleves || []).filter(e => P().ficheConcernee ? P().ficheConcernee(e) : !e.archive).sort((a, b) => (a.classe || '').localeCompare(b.classe || '', 'fr', { numeric: true }) || (a.nom || '').localeCompare(b.nom || '', 'fr'));
 }
+// 20/11 : les numéros sont donnés tout seuls à l'enregistrement (app.js, numeroterFiches) : ici on s'assure seulement qu'ils le sont
 function attribuerCodes() {
-  const f = etat(), pris = new Set(Object.values(f.codes)); let n = 0;
-  elevesConcernes().forEach(e => { if (f.codes[e.id]) return; let c; do { c = String(1000 + hasard(9000)); } while (pris.has(c)); pris.add(c); f.codes[e.id] = c; n++; });
-  return n;
+  const f = etat(), avant = Object.keys(f.codes).length;
+  if (P().numeroter) P().numeroter(); else elevesConcernes().forEach(e => { if (f.codes[e.id]) return; const pris = new Set(Object.values(f.codes)); let c; do { c = String(1000 + hasard(9000)); } while (pris.has(c)); f.codes[e.id] = c; });
+  return Object.keys(f.codes).length - avant;
 }
 
 function ficheDe(e) {
@@ -152,13 +153,24 @@ window.fichesImprimer = async () => {
     const svg = {}, carte = e => { const c = f.codes[e.id], u = urlFiche(f, c); svg[c] = svg[c] || qr(u); return `<div class="c"><div class="g1"><div class="q">${svg[c]}</div><div class="n">${c}</div></div><div class="d"><div><b>${esc(e.nom)} ${esc(e.prenom)}</b></div><div>${esc(e.classe)}</div><div class="u">${esc(u)}</div></div></div>`; };
     const parNum = E.slice().sort((a, b) => Number(f.codes[a.id]) - Number(f.codes[b.id]));
     const parNom = E.slice().sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }) || (a.prenom || '').localeCompare(b.prenom || '', 'fr', { sensitivity: 'base' }));
-    const cartes = `<h2>1. Par numéro (ordre croissant)</h2><div class="g">${parNum.map(carte).join('')}</div>`
-      + `<h2 class="saut">2. Par ordre alphabétique (nom)</h2><div class="g">${parNom.map(carte).join('')}</div>`;
+    // 3. par AESH (20/11) : AESH par ordre alphabétique du nom de famille, ses élèves dessous ; un élève suivi par deux AESH apparaît sous chacune
+    const s0 = S(), famille = a => (String(a.nom || '').split(' ').slice(1).join(' ') || a.nom || ''), ids = new Set(E.map(e => e.id));
+    const suiviPar = a => (s0.affectations || []).filter(x => x.aeshId === a.id && ids.has(x.eleveId)).map(x => E.find(e => e.id === x.eleveId)).filter((e, i, L) => e && L.indexOf(e) === i);
+    const parNomTri = L => L.slice().sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }) || (a.prenom || '').localeCompare(b.prenom || '', 'fr', { sensitivity: 'base' }));
+    const groupes = (s0.aesh || []).slice().sort((a, b) => famille(a).localeCompare(famille(b), 'fr', { sensitivity: 'base' }) || String(a.nom).localeCompare(String(b.nom), 'fr')).map(a => [a, parNomTri(suiviPar(a))]).filter(([, L]) => L.length);
+    const sansAesh = parNomTri(E.filter(e => !(s0.affectations || []).some(x => x.eleveId === e.id && groupes.some(([a]) => a.id === x.aeshId))));
+    const parAesh = groupes.map(([a, L]) => `<div class="ga"><h3>Suivis par ${esc(a.nom)} <span class="nb">(${L.length} élève${L.length > 1 ? 's' : ''})</span></h3><div class="g">${L.map(carte).join('')}</div></div>`).join('')
+      + (sansAesh.length ? `<div class="ga"><h3>Sans AESH pour l'instant <span class="nb">(${sansAesh.length})</span></h3><div class="g">${sansAesh.map(carte).join('')}</div></div>` : '');
+    const cartes = `<div class="choix"><b>Afficher :</b> <button data-v="tout" class="on">Les trois classements</button><button data-v="num">Par numéro</button><button data-v="nom">Par ordre alphabétique</button><button data-v="aesh">Par AESH</button></div>`
+      + `<section data-s="num"><h2>1. Par numéro (ordre croissant)</h2><div class="g">${parNum.map(carte).join('')}</div></section>`
+      + `<section data-s="nom"><h2 class="saut">2. Par ordre alphabétique (nom)</h2><div class="g">${parNom.map(carte).join('')}</div></section>`
+      + `<section data-s="aesh"><h2 class="saut">3. Par AESH</h2>${parAesh}</section>`
+      + `<script>document.querySelectorAll('.choix button').forEach(function(b){b.onclick=function(){document.querySelectorAll('.choix button').forEach(function(x){x.className=x===b?'on':'';});var v=b.getAttribute('data-v');document.querySelectorAll('section[data-s]').forEach(function(s,i){s.style.display=v==='tout'||s.getAttribute('data-s')===v?'':'none';var h=s.querySelector('h2');if(h)h.className=(v==='tout'&&i>0)?'saut':'';});};});<\/script>`;
     w.document.open(); w.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>QR codes des fiches élèves</title><style>
       body{font:13px -apple-system,sans-serif;margin:16px;color:#000}h1{font-size:18px;margin:0 0 4px}p{margin:0 0 12px}
       .g{display:grid;grid-template-columns:1fr 1fr;gap:10px}.c{display:flex;gap:10px;align-items:center;border:1px dashed #999;border-radius:8px;padding:8px;break-inside:avoid}
       .g1{display:flex;flex-direction:column;align-items:center;flex:none;width:118px}.q{width:110px}.q svg{width:110px;height:110px;display:block}.n{font-size:24px;font-weight:700;letter-spacing:.08em;line-height:1.1;margin-top:2px}.d{min-width:0}.u{font-size:10px;color:#555;word-break:break-all}
-      h2{font-size:16px;margin:14px 0 8px}@media print{button{display:none}.saut{break-before:page;page-break-before:always;margin-top:0}}</style></head><body>
+      h2{font-size:16px;margin:14px 0 8px}h3{font-size:14px;margin:14px 0 6px;break-after:avoid}.nb{font-weight:400;color:#555}.choix{margin:0 0 10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}.choix button{font-size:14px;padding:6px 10px;border:1px solid #999;border-radius:6px;background:#fff}.choix button.on{background:#37667F;color:#fff;border-color:#37667F}@media print{button,.choix{display:none}.saut{break-before:page;page-break-before:always;margin-top:0}}</style></head><body>
       <h1>Fiches élèves AESH : QR codes et numéros</h1><p><b>Document confidentiel, à garder dans le classeur.</b> Découpe la colonne de gauche (QR code + numéro) <b>sans le nom</b> pour l'emploi du temps ou le carnet. Pour une puce NFC, écris l'adresse sous le QR code avec l'appli NFC Tools (Écrire › Ajouter un enregistrement › URL).</p>
       <button onclick="print()" style="font-size:15px;padding:8px 14px;margin-bottom:12px">Imprimer</button>${cartes}</body></html>`); w.document.close();
   } catch (e) { w.document.body.innerHTML = '<p style="font:16px sans-serif;color:#b3261e">Impossible de fabriquer les QR codes : ' + esc(e.message) + '</p>'; }
@@ -236,7 +248,7 @@ function feGestion(f, E) {
     <h2 style="margin-top:0">Liens NFC et page des fiches</h2>
     <p class="muted" style="margin:0 0 10px">Les AESH qui remplacent scannent la puce ou le QR code de l'élève : elles voient sa classe, son accompagnement et les aides à mettre en place. Aucun nom n'apparaît, seulement un numéro à 4 chiffres. La page est chiffrée avec le code d'équipe.</p>
     <p style="margin:0 0 10px">Adresse : <a href="${esc(f.site)}" target="_blank" rel="noopener">${esc(f.site)}</a> <button class="btn sm" onclick="fichesSite()">Changer</button></p>
-    <p class="small muted" style="margin:0 0 10px">${E.length} élèves avec des créneaux${sansNum ? ` · <b>${sansNum} sans numéro</b> (ils en recevront un)` : ''}${f.fabrique ? ' · page fabriquée le ' + date(f.fabrique) : ' · page jamais fabriquée'}</p>
+    <p class="small muted" style="margin:0 0 10px">${E.length} élèves suivis${sansNum ? ` · <b>${sansNum} sans numéro</b> (ils en recevront un)` : ''}${f.fabrique ? ' · page fabriquée le ' + date(f.fabrique) : ' · page jamais fabriquée'}</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn primary" onclick="fichesFabriquer()">Fabriquer la page des fiches</button>
       <button class="btn" onclick="fichesImprimer()">Imprimer les QR codes et numéros</button>
