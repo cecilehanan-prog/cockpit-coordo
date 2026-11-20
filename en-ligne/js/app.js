@@ -498,6 +498,35 @@ function load() {
 const QUESTIONS_INITIALES = []; // version en ligne : questions nominatives retirées
 // répartitions « à confirmer » confirmées par un clic : retenues (élève + AESH + heures) même quand les données de référence sont rechargées ; si les heures changent, la confirmation est à refaire
 function cleAff(x) { return x.eleveId + '|' + x.aeshId + '|' + (x.heures ?? 0); }
+/* ---- Doublons d'élèves (20/11) : même NOM + prénom = une seule fiche. Arrivaient quand le même fichier était importé sur deux
+   appareils avant la synchro (chacun créait sa fiche). Fusion automatique, sans perte : la fiche la plus remplie est gardée,
+   les champs vides sont complétés par l'autre, AESH, créneaux et code de fiche sont rattachés à la fiche gardée. ---- */
+let DOUBLONS_FUSIONNES = [];
+const cleNom = e => String((e.nom || '') + '|' + (e.prenom || '')).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z|]+/g, ' ').replace(/ ?\| ?/, '|').trim();
+const vide = v => v == null || v === '' || (Array.isArray(v) && !v.length);
+function fusionnerDoublons(s) {
+  const fus = [], groupes = {};
+  (s.eleves || []).forEach(e => { if (e.nom) (groupes[cleNom(e)] ||= []).push(e); });
+  Object.values(groupes).filter(g => g.length > 1).forEach(g => {
+    const actifs = g.filter(e => !e.archive), L = (actifs.length ? actifs : g).slice().sort((a, b) => String(a.id).localeCompare(String(b.id))); // choix identique sur tous les appareils (sinon deux appareils garderaient chacun une fiche différente)
+    const garde = L[0], autres = g.filter(e => e !== garde), ids = new Set(autres.map(e => e.id));
+    autres.forEach(o => { Object.keys(o).forEach(k => { if (k === 'id' || k === 'archive') return;
+      if (vide(garde[k]) && !vide(o[k])) garde[k] = o[k];
+      else if (garde[k] && o[k] && typeof garde[k] === 'object' && !Array.isArray(garde[k]) && typeof o[k] === 'object') Object.keys(o[k]).forEach(k2 => { if (vide(garde[k][k2])) garde[k][k2] = o[k][k2]; }); }); });
+    (s.affectations || []).forEach(a => { if (ids.has(a.eleveId)) a.eleveId = garde.id; });
+    (s.creneaux || []).forEach(c => { if (ids.has(c.eleveId)) c.eleveId = garde.id; });
+    (s.prisesOcc || []).forEach(p => { if (ids.has(p.eleveId)) p.eleveId = garde.id; });
+    const codes = s.fiches && s.fiches.codes; if (codes) autres.forEach(o => { if (codes[o.id] && !codes[garde.id]) codes[garde.id] = codes[o.id]; delete codes[o.id]; });
+    s.eleves = s.eleves.filter(e => !ids.has(e.id));
+    fus.push(`${garde.nom} ${garde.prenom} (${g.length} fiches → 1)`);
+  });
+  if (fus.length) {
+    const vu = {}; s.affectations = s.affectations.filter(a => { const k = a.eleveId + '|' + a.aeshId; if (vu[k]) { vu[k].heures = Math.max(+vu[k].heures || 0, +a.heures || 0); if (!a.aConfirmer) vu[k].aConfirmer = false; return false; } vu[k] = a; return true; });
+    const vc = new Set(); s.creneaux = s.creneaux.filter(c => { const k = [c.aeshId, c.eleveId, c.jour, c.debut, c.fin, c.groupe || ''].join('|'); if (vc.has(k)) return false; vc.add(k); return true; });
+  }
+  const vcl = new Set(); s.classes = (s.classes || []).filter(c => { const k = String(c.nom || '').trim().toLowerCase(); if (k && vcl.has(k)) return false; vcl.add(k); return true; });
+  return fus;
+}
 function migrate(s) {
   s.affConfirmees = s.affConfirmees || []; s.affectations.forEach(x => { if (x.aConfirmer && s.affConfirmees.includes(cleAff(x))) x.aConfirmer = false; });
   s.schemaVersion = s.schemaVersion || 1;
@@ -518,6 +547,7 @@ function migrate(s) {
   { const vus = new Set(); s.absences = s.absences.filter(x => { const k = [x.aeshId, x.debut || '', x.fin || '', x.ouvert ? 'o' : 'f'].join('|'); if (vus.has(k)) return false; vus.add(k); return true; }); }
   s.calendrier = s.calendrier || { annee: s.annee || '', refLundi: '', refQ: 'Q1', vacances: [], feries: [] };
   s.regles = Object.assign({ jours: true, horaires: true, niveaux: true }, s.regles || {}); delete s.regles.trou; delete s.regles.midi; // le comptage des trous a été supprimé
+  DOUBLONS_FUSIONNES = fusionnerDoublons(s);
   return s;
 }
 function save() { S._savedAt = new Date().toISOString(); const txt = JSON.stringify(S);
@@ -1572,7 +1602,9 @@ window.editEleve = (id, presets = {}) => {
       let perdu = '';
       if (avant && dispositifDe(e) !== avant) { const gone = S.affectations.filter(x => x.eleveId === e.id && aesh(x.aeshId)?.dispositif === avant); S.affectations = S.affectations.filter(x => !gone.includes(x)); perdu = gone.length ? ` — quitte ${avant} : ${gone.map(x => aesh(x.aeshId).nom).join(', ')} retirée${gone.length > 1 ? 's' : ''}, AESH à attribuer` : ` — quitte ${avant}`; }
       synchroDispositifs(); commit('eleve', `${e.nom} ${e.prenom} modifié${chg.length ? ' (' + chg.join(', ') + ')' : ''}${perdu}`); }
-    else { obj.id = uid('e'); S.eleves.push(obj); synchroDispositifs(); commit('eleve', `Élève ajouté : ${obj.nom} ${obj.prenom} (${obj.classe}, ${obj.type}, ${obj.statut})`); location.hash = '#/eleves/' + obj.id; }
+    else { const meme = S.eleves.filter(x => cleNom(x) === cleNom(obj));
+      if (meme.length && window.__doublonOk !== cleNom(obj)) { window.__doublonOk = cleNom(obj); const f = $('#mform'); if (f && !f.querySelector('.alerte-doublon')) f.insertAdjacentHTML('afterbegin', `<div class="alerte-doublon" style="background:#FDECEA;border:1px solid #E5A29A;border-radius:8px;padding:8px 10px;margin-bottom:10px"><b>⚠ Doublon ?</b> ${meme.map(x => `${esc(x.nom)} ${esc(x.prenom)} existe déjà (${esc(x.classe || '?')}, ${esc(x.type || '')}, ${esc(x.statut || '')}${x.notifFin ? ', notification jusqu’au ' + frDate(x.notifFin) : ''}${x.archive ? ', archivé' : ''})`).join(' ; ')}. Ne crée pas une 2ᵉ fiche : ouvre plutôt la fiche existante. Si c'est vraiment un autre élève, clique de nouveau sur Enregistrer.</div>`); f && f.scrollIntoView && f.scrollIntoView(); return false; }
+      window.__doublonOk = null; obj.id = uid('e'); S.eleves.push(obj); synchroDispositifs(); commit('eleve', `Élève ajouté : ${obj.nom} ${obj.prenom} (${obj.classe}, ${obj.type}, ${obj.statut})`); location.hash = '#/eleves/' + obj.id; }
   });
 };
 // navigation entre fiches : suit l'ordre de la liste Élèves telle qu'elle est affichée (tri et filtres), sinon l'ordre par défaut
@@ -2059,7 +2091,7 @@ window.nouvelleAnneeCalendrier = () => { if (!confirm('Vider les vacances et les
 function garderRetraits(d) { const loc = (S && S.prisesRetirees) || {}, RT = d.prisesRetirees = d.prisesRetirees || {};
   Object.keys(loc).forEach(id => { if (!RT[id] || (loc[id].le || '') > (RT[id].le || '')) RT[id] = loc[id]; });
   d.prisesOcc = (d.prisesOcc || []).filter(x => { const t = RT[x.occId]; return !t || (x.priseLe || '') > (t.priseLe || ''); }); return d; }
-window.cockpitSync = { cle: KEY, appliquer: d => { S = migrate(garderRetraits(d)); localStorage.setItem(KEY, JSON.stringify(S)); verifierRetours(); render(); } }; // retours d'absence aussi vérifiés après réception // synchro chiffrée (js/sync.js)
+window.cockpitSync = { cle: KEY, appliquer: d => { S = migrate(garderRetraits(d)); if (DOUBLONS_FUSIONNES.length) { log('eleve', 'Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')); S._savedAt = new Date().toISOString(); } localStorage.setItem(KEY, JSON.stringify(S)); verifierRetours(); render(); } }; // retours d'absence aussi vérifiés après réception // synchro chiffrée (js/sync.js)
 window.exportJSON = () => dl(`cockpit-pas_${S.annee}_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S, null, 1));
 window.importJSON = file => { if (!file) return; const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); if (!d.eleves || !d.aesh) throw 0; S = migrate(d); log('import', `JSON importé : ${file.name}`); save(); render(); toast('Import réussi'); } catch { alert('Fichier JSON invalide.'); } }; r.readAsText(file); };
 /* ---- Mise à jour d'emplois du temps AESH depuis un fichier préparé (type « edt-aesh ») ----
@@ -2460,7 +2492,7 @@ function modal(html, onSave, onDelete) {
 window.closeModal = () => { $('#modal').innerHTML = ''; document.onkeydown = null; };
 
 /* ====================== INIT ====================== */
-load(); { const nd = appliquerDossiers() + appliquerEss() + appliquerStatuts(); if (nd) { log('eleve', 'Fiches élèves mises à jour d\'après les documents (PPS, MOPPS, notifications, GEVASCO…)'); save(); } } chargerDossiers(); if (synchroDispositifs()) { log('affectation', 'Élèves ULIS / SEGPA rattachés automatiquement aux AESH de leur dispositif'); save(); } render(); verifierRetours(); essVerifierRappel(); setInterval(essVerifierRappel, 60000); ccVerifierRappel(); setInterval(ccVerifierRappel, 60000);
+load(); if (DOUBLONS_FUSIONNES.length) { log('eleve', 'Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')); save(); setTimeout(() => toast('Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')), 800); } { const nd = appliquerDossiers() + appliquerEss() + appliquerStatuts(); if (nd) { log('eleve', 'Fiches élèves mises à jour d\'après les documents (PPS, MOPPS, notifications, GEVASCO…)'); save(); } } chargerDossiers(); if (synchroDispositifs()) { log('affectation', 'Élèves ULIS / SEGPA rattachés automatiquement aux AESH de leur dispositif'); save(); } render(); verifierRetours(); essVerifierRappel(); setInterval(essVerifierRappel, 60000); ccVerifierRappel(); setInterval(ccVerifierRappel, 60000);
 setInterval(verifierRetours, 3600 * 1000); evalsActualiser(true); prisesActualiser(true); setInterval(() => { evalsActualiser(true); prisesActualiser(true); }, 120000); setTimeout(() => { if (serveurOK()) publierAuto(); }, 4000); setInterval(() => { if (serveurOK() && S.pubJour !== aujourdhui()) publierAuto(); }, 600000); document.addEventListener('visibilitychange', () => { if (!document.hidden) { verifierRetours(); chargerDossiers(); } });
 // Un clic sur « Synthèse » actualise toute l'application : relecture des fichiers de données (nouvelle version éventuelle) puis recalcul de toutes les pages. Les saisies sont déjà enregistrées, rien n'est perdu.
 const lienSynthese = document.querySelector('#nav a[href="#/synthese"]');
