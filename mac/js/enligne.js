@@ -217,7 +217,7 @@ function fenetre(html) {
   w.addEventListener('click', e => { if (e.target === w || e.target.hasAttribute('data-x')) w.remove(); }); document.body.appendChild(w); return w;
 }
 window.enligneActiver = async () => { try { await activer(); toast('Appli en ligne activée'); window.PAS.render(); window.evalsActualiser && window.evalsActualiser(true); } catch (e) { alert(e.message); } };
-window.enligneCopier = (t, b) => navigator.clipboard.writeText(t).then(() => { b.textContent = 'Copié'; }, () => prompt('Copie ce lien :', t));
+window.enligneCopier = (t, b) => navigator.clipboard.writeText(t).then(() => { b.textContent = 'Copié'; }, () => window.saisir('Copie ce lien (sélectionné) :', t, { ok: 'Fermer', annuler: null }));
 window.enligneLienProfs = () => { const cfg = cfgEnLigne(); if (!cfg) return; const l = lienProfs(cfg);
   fenetre(`<h2>Lien pour les enseignant.e.s</h2><p class="small muted">Avec ce lien, un.e enseignant.e t'envoie une demande d'AESH (DS, évaluation…). Il ne donne accès à rien d'autre. Mets-le dans l'ENT ou envoie-le par mail.</p><p style="word-break:break-all"><a href="${esc(l)}" target="_blank" rel="noopener">${esc(l)}</a></p><button class="btn primary" onclick="enligneCopier('${esc(l)}',this)">Copier le lien</button> <button class="btn" onclick="enligneMailProfs()">Préparer un mail</button>`);
   window.enligneMailProfs = () => mail('', 'Demander une AESH pour un DS ou une évaluation', "Bonjour,\n\nPour demander une AESH lors d'un DS, d'une évaluation ou d'une sortie, cliquez sur ce lien et remplissez le formulaire (pas besoin de compte ni de mot de passe) :\n" + l + "\n\nMerci de ne pas écrire de nom d'élève. Je vous réponds par mail.\n\nMerci !" + SIGNATURE); };
