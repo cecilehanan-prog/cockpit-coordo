@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cockpit Coordo — suivi AESH</title>
 <link rel="stylesheet" href="css/app.css?v=20261113a">
+<link rel="stylesheet" href="https://cecilehanan-prog.github.io/cockpit-coordo/css/app.css" onerror="this.remove()">
 </head>
 <body>
 <div id="app">
@@ -70,10 +71,26 @@
 <script src="js/dossiers-donnees.js?v=20261107i"></script>
 <script src="js/pial-donnees.js?v=20261107i"></script>
 <script src="js/ess-donnees.js?v=20261107i"></script>
-<script src="js/enligne.js?v=20261113b"></script>
-<script src="js/app.js?v=20261120a"></script>
-<script src="js/sync-config.js?v=20261107i"></script>
-<script src="js/sync.js?v=20261120a"></script>
-<script src="js/fiches.js?v=20261119t"></script>
+<!-- 20/11/2026 : le code (appli, synchro, fiches) est pris directement sur GitHub à chaque ouverture : plus rien à copier sur le Mac.
+     Sans internet, ou si GitHub ne répond pas, la copie de ce dossier (js/…) est utilisée. Les données (data.js, PIAL, ESS, dossiers) restent celles du Mac. -->
+<script>
+(function () {
+  var GH = 'https://cecilehanan-prog.github.io/cockpit-coordo/';
+  var CODE = ['js/enligne.js', 'js/app.js', 'js/sync-config.js', 'js/sync.js', 'js/fiches.js'];
+  window.COCKPIT_CODE_SOURCE = 'github';
+  function local(f) { return new Promise(function (ok) { var s = document.createElement('script'); s.src = f + '?v=' + Date.now(); s.onload = s.onerror = ok; document.body.appendChild(s); }); }
+  function distant(f) {
+    var ctl = window.AbortController ? new AbortController() : null, t = setTimeout(function () { if (ctl) ctl.abort(); }, 12000);
+    return fetch(GH + f + '?t=' + Date.now(), { cache: 'no-store', signal: ctl ? ctl.signal : undefined }).then(function (r) { clearTimeout(t); if (!r.ok) throw new Error(r.status); return r.text(); });
+  }
+  // on télécharge tout d'abord ; si un seul fichier manque, on prend toute la copie du Mac (jamais un mélange de versions)
+  Promise.all(CODE.map(distant)).then(function (textes) {
+    textes.forEach(function (txt, i) { var s = document.createElement('script'); s.text = txt + '\n//# sourceURL=' + GH + CODE[i]; document.body.appendChild(s); });
+  }, function () {
+    window.COCKPIT_CODE_SOURCE = 'local';
+    CODE.reduce(function (p, f) { return p.then(function () { return local(f); }); }, Promise.resolve());
+  });
+})();
+</script>
 </body>
 </html>
