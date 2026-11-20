@@ -549,9 +549,26 @@ function migrate(s) {
   s.calendrier = s.calendrier || { annee: s.annee || '', refLundi: '', refQ: 'Q1', vacances: [], feries: [] };
   s.regles = Object.assign({ jours: true, horaires: true, niveaux: true }, s.regles || {}); delete s.regles.trou; delete s.regles.midi; // le comptage des trous a été supprimé
   DOUBLONS_FUSIONNES = fusionnerDoublons(s);
+  NUMEROS_DONNES = numeroterFiches(s);
   return s;
 }
-function save() { reunirSyncEnAttente(); S._savedAt = new Date().toISOString(); const txt = JSON.stringify(S);
+/* 20/11 : chaque élève suivi reçoit tout seul son numéro de fiche à 4 chiffres (et donc son QR code), dès qu'il est créé
+   (« Nouvel élève », import, synchro). Un numéro déjà donné ne change jamais (puces et QR déjà imprimés). Le numéro d'un
+   nouvel élève est tiré de son identifiant : deux appareils qui le numérotent en même temps lui donnent le même. */
+let NUMEROS_DONNES = 0;
+// élève qui a une fiche : suivi (non archivé, pas sorti) ET notifié, ou déjà accompagné (AESH ou créneau)
+const ficheConcernee = (s, e) => !e.archive && e.statut !== 'Sorti / fin de notification' && (e.statut === 'Notifié' || (s.affectations || []).some(a => a.eleveId === e.id && a.heures > 0) || (s.creneaux || []).some(c => c.eleveId === e.id));
+function numeroterFiches(s) {
+  if (!s.fiches) return 0; const codes = s.fiches.codes = s.fiches.codes || {};
+  const pris = new Set(Object.values(codes).map(String)); let n = 0;
+  (s.eleves || []).filter(e => ficheConcernee(s, e) && !codes[e.id]).sort((a, b) => String(a.id).localeCompare(String(b.id))).forEach(e => {
+    let h = 2166136261; for (const ch of String(e.id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+    let c = 1000 + h % 9000; while (pris.has(String(c))) c = c >= 9999 ? 1000 : c + 1;
+    codes[e.id] = String(c); pris.add(String(c)); n++;
+  });
+  return n;
+}
+function save() { reunirSyncEnAttente(); numeroterFiches(S); S._savedAt = new Date().toISOString(); const txt = JSON.stringify(S);
   try { localStorage.setItem(KEY, txt); }
   catch (err) { // mémoire du navigateur pleine : on allège le journal puis on réessaie ; sinon on le dit clairement
     if (S.journal && S.journal.length > 200) { S.journal.length = 200; try { localStorage.setItem(KEY, JSON.stringify(S)); toast('Journal raccourci pour libérer de la place'); } catch (e2) { return erreurEnregistrement(e2); } }
@@ -2606,12 +2623,12 @@ function modal(html, onSave, onDelete) {
 window.closeModal = () => { $('#modal').innerHTML = ''; document.onkeydown = null; setTimeout(appliquerSyncEnAttente, 0); };
 
 /* ====================== INIT ====================== */
-load(); if (DOUBLONS_FUSIONNES.length) { log('eleve', 'Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')); save(); setTimeout(() => toast('Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')), 800); } { const nd = appliquerDossiers() + appliquerEss() + appliquerStatuts(); if (nd) { log('eleve', 'Fiches élèves mises à jour d\'après les documents (PPS, MOPPS, notifications, GEVASCO…)'); save(); } } chargerDossiers(); if (synchroDispositifs()) { log('affectation', 'Élèves ULIS / SEGPA rattachés automatiquement aux AESH de leur dispositif'); save(); } render(); verifierRetours(); essVerifierRappel(); setInterval(essVerifierRappel, 60000); ccVerifierRappel(); setInterval(ccVerifierRappel, 60000);
+load(); if (NUMEROS_DONNES) { log('eleve', `Numéros de fiche donnés automatiquement : ${NUMEROS_DONNES} élève${NUMEROS_DONNES > 1 ? 's' : ''}`); save(); } if (DOUBLONS_FUSIONNES.length) { log('eleve', 'Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')); save(); setTimeout(() => toast('Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')), 800); } { const nd = appliquerDossiers() + appliquerEss() + appliquerStatuts(); if (nd) { log('eleve', 'Fiches élèves mises à jour d\'après les documents (PPS, MOPPS, notifications, GEVASCO…)'); save(); } } chargerDossiers(); if (synchroDispositifs()) { log('affectation', 'Élèves ULIS / SEGPA rattachés automatiquement aux AESH de leur dispositif'); save(); } render(); verifierRetours(); essVerifierRappel(); setInterval(essVerifierRappel, 60000); ccVerifierRappel(); setInterval(ccVerifierRappel, 60000);
 setInterval(verifierRetours, 3600 * 1000); evalsActualiser(true); prisesActualiser(true); setInterval(() => { evalsActualiser(true); prisesActualiser(true); }, 120000); setTimeout(() => { if (serveurOK()) publierAuto(); }, 4000); setInterval(() => { if (serveurOK() && S.pubJour !== aujourdhui()) publierAuto(); }, 600000); document.addEventListener('visibilitychange', () => { if (!document.hidden) { verifierRetours(); chargerDossiers(); } });
 // Un clic sur « Synthèse » actualise toute l'application : relecture des fichiers de données (nouvelle version éventuelle) puis recalcul de toutes les pages. Les saisies sont déjà enregistrées, rien n'est perdu.
 const lienSynthese = document.querySelector('#nav a[href="#/synthese"]');
 if (lienSynthese) lienSynthese.addEventListener('click', ev => { ev.preventDefault(); try { sessionStorage.setItem('cockpit-actualise', '1'); } catch (e) { } location.hash = '#/synthese'; location.reload(); });
 try { if (sessionStorage.getItem('cockpit-actualise')) { sessionStorage.removeItem('cockpit-actualise'); setTimeout(() => toast('Application actualisée'), 300); } } catch (e) { }
 if (window.__dataJustRefreshed) { save(); setTimeout(() => toast('Données mises à jour automatiquement'), 300); }
-window.PAS = { get state() { return S; }, save, render, quinzaineDe, dureeUnique, chevauchements, apercu: apercuEleve, libDisp, sansNomEleve, ppsSummary };
+window.PAS = { get state() { return S; }, save, render, numeroter: () => numeroterFiches(S), ficheConcernee: e => ficheConcernee(S, e), quinzaineDe, dureeUnique, chevauchements, apercu: apercuEleve, libDisp, sansNomEleve, ppsSummary };
 })();
