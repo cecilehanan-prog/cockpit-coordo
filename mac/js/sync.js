@@ -21,8 +21,14 @@ const L = { cle: 'cockpit-sync-cle', sel: 'cockpit-sync-sel', vu: 'cockpit-sync-
   copie: 'cockpit-pas-v1-copie-avant-synchro', copie2: 'cockpit-pas-v1-copie-avant-v2' };
 const DOC = 'etat-v2', ANCIEN = 'etat', ANCIEN_SAUVE = 'etat-ancien', PAUSE = 'en-pause-mettre-a-jour';
 const ITER = 600000;
-const VERSION = '2026-11-20b'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
+const VERSION = '2026-11-20c'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
 let distant = null; // { appareil, savedAt } du dernier bloc vu en ligne
+// journal de la synchro (visible dans la fenêtre Synchro, gardé sur l'appareil) : dit exactement où ça en est
+let etape = '';
+const JOURNAL = (() => { try { return JSON.parse(localStorage.getItem('cockpit-sync-journal') || '[]'); } catch { return []; } })();
+function noter(txt) { etape = txt; JOURNAL.push({ t: new Date().toISOString(), txt: String(txt).slice(0, 200) }); if (JOURNAL.length > 40) JOURNAL.splice(0, JOURNAL.length - 40); try { localStorage.setItem('cockpit-sync-journal', JSON.stringify(JOURNAL)); } catch {} }
+// rien ne doit pouvoir attendre indéfiniment (réseau, IndexedDB, chargement d'un script…)
+const delai = (p, ms, quoi) => new Promise((ok, ko) => { const t = setTimeout(() => ko(new Error(quoi + ' : pas de réponse au bout de ' + Math.round(ms / 1000) + ' s')), ms); Promise.resolve(p).then(v => { clearTimeout(t); ok(v); }, e => { clearTimeout(t); ko(e); }); });
 let ancienActif = null; // un appareil resté sur l'ancien code a enregistré : { appareil, savedAt }
 let appareils = {}; // liste des appareils connectés à la nouvelle synchro (doc « appareils »)
 const get = k => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -45,8 +51,9 @@ function idb(mode, fn) {
     r.onsuccess = () => { const db = r.result; let q; try { const t = db.transaction('kv', mode); q = fn(t.objectStore('kv')); t.oncomplete = () => { db.close(); ok(q && q.result); }; t.onerror = t.onabort = () => { db.close(); ko(t.error); }; } catch (e) { db.close(); ko(e); } };
   });
 }
-async function baseLire() { try { const v = await idb('readonly', s => s.get('base')); if (v) return v; } catch {} return get(L.base); }
-async function baseEcrire(txt) { try { await idb('readwrite', s => s.put(txt, 'base')); put(L.base, null); return; } catch {} try { localStorage.setItem(L.base, txt); } catch { put(L.base, null); } }
+let idbOk = true;
+async function baseLire() { if (idbOk) { try { const v = await idb('readonly', s => s.get('base')); if (v) return v; } catch (e) { idbOk = false; noter('IndexedDB indisponible (' + (e.message || e) + ') : localStorage utilisé'); } } return get(L.base); }
+async function baseEcrire(txt) { if (idbOk) { try { await idb('readwrite', s => s.put(txt, 'base')); put(L.base, null); return; } catch (e) { idbOk = false; noter('IndexedDB indisponible (' + (e.message || e) + ') : localStorage utilisé'); } } try { localStorage.setItem(L.base, txt); } catch { put(L.base, null); } }
 
 /* ---------- réunion de deux versions (base = dernière version commune ; INCONNUE = on ne sait pas : rien n'est supprimé) ---------- */
 const ABSENT = { absent: 1 }, INCONNUE = { inconnue: 1 };
@@ -184,6 +191,7 @@ function fenetre() {
         ${c.moins.length ? `<div>Absents de la copie : ${echap(c.moins.slice(0, 12).join(', '))}${c.moins.length > 12 ? '…' : ''}</div>` : ''}
         ${!c.plus.length && !c.moins.length ? '<div class="muted">Mêmes élèves que maintenant.</div>' : ''}
         <button class="btn sm" type="button" data-copie="${i}" style="margin-top:6px">Revenir à cette copie</button></div>`).join('')}</details>` : ''}
+    <details style="margin-top:10px"><summary class="small"><b>Journal de la synchro</b> (à envoyer à Claude en cas de souci)</summary><div class="small" style="max-height:180px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:11px;margin-top:6px">${JOURNAL.slice().reverse().map(j => `<div>${new Date(j.t).toLocaleString('fr-FR')} · ${echap(j.txt)}</div>`).join('') || '<div class="muted">vide</div>'}</div></details>
     <div class="toolbar" style="justify-content:flex-end"><button class="btn" id="sync-fermer">Fermer</button></div></div>`;
   document.body.appendChild(w);
   w.querySelector('#sync-fermer').onclick = () => w.remove();
@@ -204,12 +212,13 @@ function fenetre() {
 }
 
 /* ---------- Firebase ---------- */
+let attenteMinu = 0;
 let auth = null, docRef = null, arret = null, applique = false, minuterie = 0, pret = false;
 const charger = src => new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = ko; document.head.appendChild(s); });
 const dossier = u => firebase.firestore().collection('coffres').doc(u.uid).collection('cockpit');
 // une seule opération à la fois (réception, réunion, envoi) : rien ne se croise
 let file = Promise.resolve();
-const enFile = fn => (file = file.then(fn, fn).catch(e => { console.warn('Synchro', e); dire('err', 'Erreur de synchro : ' + (e && (e.code || e.message) || e)); }));
+const enFile = fn => (file = file.then(() => delai(fn(), 60000, 'Synchro bloquée'), () => delai(fn(), 60000, 'Synchro bloquée')).catch(e => { noter('ERREUR ' + (etape ? '[' + etape + '] ' : '') + (e && (e.code || e.message) || e)); console.warn('Synchro', e);  dire('err', 'Erreur de synchro' + (etape ? ' (étape : ' + etape + ')' : '') + ' : ' + (e && (e.code || e.message) || e)); }));
 async function demarrer() {
   bouton();
   if (!CFG) { dire('attente', 'La synchro sera prête dès que ton espace Firebase sera branché.'); return; }
@@ -227,7 +236,8 @@ function ecouter(u) {
   if (arret) arret();
   utilisateur = u; pret = false;
   docRef = dossier(u).doc(DOC);
-  dire('cours', 'Connectée avec ' + (u.email || '') + '.');
+  noter('connectée, attente des données en ligne'); dire('cours', 'Connectée avec ' + (u.email || '') + ' : attente des données en ligne…');
+  clearTimeout(attenteMinu); attenteMinu = setTimeout(() => { if (!pret) { noter('aucune réponse de Firebase après 30 s'); dire('err', "Firebase ne répond pas depuis 30 s (connexion internet, ou bloqueur de contenu dans le navigateur ?). Recharge la page."); } }, 30000);
   const a1 = docRef.onSnapshot(s => { if (s.metadata && s.metadata.hasPendingWrites) return; const d = s.data(); enFile(() => recevoir(d)); },
     () => dire('err', "Je n'arrive pas à lire ton espace Firebase (règles ?)."));
   // un appareil resté sur l'ancien code écrit encore à l'ancien emplacement : on le signale, on garde ce qu'il a envoyé, on remet la pause
@@ -239,7 +249,7 @@ function ecouter(u) {
 // fiche de cet appareil (nom, version du code, dernier contact) : visible dans la fenêtre Synchro de tous les appareils
 async function signaler() {
   if (!utilisateur) return;
-  try { await dossier(utilisateur).doc('appareils').set({ [monId]: { nom: nomAppareil(), version: VERSION, code: window.COCKPIT_CODE_SOURCE || 'local', vu: new Date().toISOString() } }, { merge: true }); } catch (e) { console.warn('appareils', e); }
+  try { await delai(dossier(utilisateur).doc('appareils').set({ [monId]: { nom: nomAppareil(), version: VERSION, code: window.COCKPIT_CODE_SOURCE || 'local', vu: new Date().toISOString() } }, { merge: true }), 20000, 'Liste des appareils'); } catch (e) { console.warn('appareils', e); }
 }
 // L'ancien emplacement (« etat ») servait aux anciennes versions du code. On en garde une copie (« etat-ancien »), puis on le
 // remplace par un bloc « en pause » : un appareil resté sur l'ancien code affiche « ⚠ à vérifier » et n'envoie plus rien.
@@ -248,10 +258,11 @@ async function mettreAncienEnPause(u, d) {
     const anc = dossier(u).doc(ANCIEN);
     if (!d || d.sel === PAUSE || !d.data) return;
     const sauve = dossier(u).doc(ANCIEN_SAUVE);
-    if (!(await sauve.get()).exists) await sauve.set(d); // état au moment du passage à la nouvelle synchro
-    else { await dossier(u).doc('etat-ancien-dernier').set(d); ancienActif = { appareil: d.appareil, savedAt: d.savedAt }; // envoyé ENSUITE par un appareil pas mis à jour
+    noter('ancien emplacement : un appareil à l’ancien code a écrit (' + (d.appareil || '?') + ')');
+    if (!(await delai(sauve.get(), 20000, 'Ancien emplacement')).exists) await delai(sauve.set(d), 20000, 'Ancien emplacement'); // état au moment du passage à la nouvelle synchro
+    else { await delai(dossier(u).doc('etat-ancien-dernier').set(d), 20000, 'Ancien emplacement'); ancienActif = { appareil: d.appareil, savedAt: d.savedAt }; // envoyé ENSUITE par un appareil pas mis à jour
       dire('err', `Un appareil a encore l'ancienne version (${d.appareil || '?'}, ${quand(d.savedAt)}) : ce qu'il enregistre n'arrive pas ici. Mets-le à jour.`); }
-    await anc.set({ v: 1, sel: PAUSE, iv: '', data: 'pause', gz: false, savedAt: '', appareil: 'ANCIENNE VERSION : mets à jour cet appareil (nouveau code du 20/11)' });
+    await delai(anc.set({ v: 1, sel: PAUSE, iv: '', data: 'pause', gz: false, savedAt: '', appareil: 'ANCIENNE VERSION : mets à jour cet appareil (nouveau code du 20/11)' }), 20000, 'Ancien emplacement');
   } catch (e) { console.warn('Ancien emplacement', e); }
 }
 // L'iPad et l'iPhone remplacent souvent ' par ’ (et ajoutent parfois un espace) : on essaie ces variantes
@@ -316,6 +327,7 @@ function appliquerRecu(obj) { applique = true; try { APP().appliquer(obj); } fin
 function apresApplication(at) { if (savedAt(get(APP().cle)) !== at) planifier(); }
 async function recevoir(d, essai = 0) {
   if (d) distant = { appareil: d.appareil, savedAt: d.savedAt };
+  noter('reçu en ligne : ' + (d && d.data ? (d.appareil || '?') + ', ' + quand(d.savedAt) : 'espace vide'));
   const raw = get(L.cle); if (!raw || !APP()) return;
   if (d && d.sel && get(L.sel) && d.sel !== get(L.sel)) return dire('err', 'La clé a changé sur un autre appareil : reconnecte celui-ci.');
   const local = get(APP().cle), lAt = savedAt(local), vu = get(L.vu) || '';
@@ -324,9 +336,11 @@ async function recevoir(d, essai = 0) {
   if (d.savedAt === lAt) { if (vu !== lAt) { put(L.vu, lAt); await baseEcrire(local); } return dire('ok', 'Tout est à jour.'); }
   if (d.savedAt === vu) return lAt !== vu && local ? envoyerMaintenant() : dire('ok', 'Tout est à jour.'); // rien de nouveau en ligne ; nos changements partent
   // il y a du nouveau en ligne
+  noter('déchiffrement');
   let p; try { p = await ouvrir(d, unb64(raw)); } catch { return dire('err', 'Impossible de déchiffrer : vérifie ta phrase secrète (déconnecte puis reconnecte cet appareil).'); }
-  let texte; try { texte = new TextDecoder().decode(d.gz ? await decompresser(p) : p); } catch (e) { return dire('err', "La phrase est bonne, mais cet appareil n'arrive pas à décompresser les données (" + (e.message || e) + '). Vérifie la connexion internet puis recharge la page.'); }
+  let texte; try { texte = new TextDecoder().decode(d.gz ? await delai(decompresser(p), 20000, 'Décompression') : p); } catch (e) { return dire('err', "La phrase est bonne, mais cet appareil n'arrive pas à décompresser les données (" + (e.message || e) + '). Vérifie la connexion internet puis recharge la page.'); }
   const dist = JSON.parse(texte);
+  noter('application des données reçues');
   if (d.remplace) { // « Envoyer les données de cet appareil à tous » sur un autre appareil : on prend tout (copie de celui-ci gardée)
     if (local && sansDate(JSON.parse(local)) !== sansDate(dist)) put(L.copie, local);
     appliquerRecu(dist); put(L.vu, d.savedAt); await baseEcrire(texte); apresApplication(d.savedAt);
@@ -342,6 +356,7 @@ async function recevoir(d, essai = 0) {
     return dire('ok', 'Mis à jour depuis ' + (d.appareil || 'un autre appareil') + '.');
   }
   // les deux ont changé : on réunit, à partir de la dernière version commune
+  noter('réunion des modifications des deux appareils');
   let base = null; try { const bt = await baseLire(); const bo = bt && JSON.parse(bt); if (bo && bo._savedAt === vu) base = bo; } catch {}
   const m = reunirEtats(base, JSON.parse(local), dist);
   if (get(APP().cle) !== local) return essai < 3 ? recevoir(d, essai + 1) : planifier(); // une saisie est arrivée pendant la réunion : on recommence
@@ -358,17 +373,17 @@ async function envoyerMaintenant(force, essai = 0) {
   const raw = get(L.cle); if (!docRef || !raw || (!pret && !force)) return;
   const local = get(APP().cle); if (!local) return;
   const at = savedAt(local), vu = get(L.vu) || '';
-  dire('cours', null);
+  dire('cours', null); noter('envoi des données de cet appareil');
   try {
     const c = await chiffrer(local, unb64(raw));
     const doc = { v: 2, sel: get(L.sel), iv: c.iv, data: c.data, gz: c.gz, savedAt: at, appareil: nomAppareil(), version: VERSION };
     // on n'écrase jamais une version en ligne qu'on n'a pas encore vue : on la réunit d'abord
     let autre = null;
-    await firebase.firestore().runTransaction(async t => {
-      const s = await t.get(docRef), d = s.data(); autre = null;
-      if (d && d.data && d.savedAt !== vu && d.savedAt !== at) { autre = d; return; }
-      t.set(docRef, doc);
-    });
+    // lecture puis écriture simples (les mêmes opérations que l'ancienne synchro, qui marchaient partout ; pas de « transaction »)
+    const d = (await delai(docRef.get(), 25000, 'Lecture avant envoi')).data();
+    if (d && d.data && d.savedAt !== vu && d.savedAt !== at) autre = d;
+    else await delai(docRef.set(doc), 30000, 'Envoi');
+    noter(autre ? 'une version plus récente est en ligne : réunion' : 'envoyé');
     if (autre) return essai < 3 ? recevoir(autre) : dire('err', 'Plusieurs appareils enregistrent en même temps : réessaie dans un instant.');
     put(L.vu, at); await baseEcrire(local); dire('ok', 'Tout est à jour.'); signaler();
   } catch (e) { dire(navigator.onLine ? 'err' : 'hors', navigator.onLine ? "L'envoi a échoué : " + (e.code || e.message || '') : 'Hors ligne : ce sera envoyé au retour de la connexion.'); }
@@ -380,7 +395,8 @@ function imposer() {
     const o = JSON.parse(local); o._savedAt = new Date().toISOString(); const txt = JSON.stringify(o);
     applique = true; try { localStorage.setItem(APP().cle, txt); } finally { applique = false; }
     const c = await chiffrer(txt, unb64(raw));
-    await docRef.set({ v: 2, sel: get(L.sel), iv: c.iv, data: c.data, gz: c.gz, savedAt: o._savedAt, appareil: nomAppareil(), version: VERSION, remplace: true });
+    noter('envoi à tous (cet appareil fait référence)');
+    await delai(docRef.set({ v: 2, sel: get(L.sel), iv: c.iv, data: c.data, gz: c.gz, savedAt: o._savedAt, appareil: nomAppareil(), version: VERSION, remplace: true }), 30000, 'Envoi');
     put(L.vu, o._savedAt); await baseEcrire(txt); dire('ok', 'Les données de cet appareil sont envoyées à tous tes appareils.'); signaler();
   });
 }
