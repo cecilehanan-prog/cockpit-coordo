@@ -1169,7 +1169,10 @@ window.questionReponse = (id, v) => { const q = S.questions.find(x => x.id === i
 window.questionSupprimer = async id => { if (!(await demander('Supprimer cette question ?', { ok: 'Supprimer', danger: true }))) return; const q = S.questions.find(x => x.id === id); if (!q) return; S.questions = S.questions.filter(x => x.id !== id); commit('question', 'Question supprimée : ' + q.texte.slice(0, 50)); };
 function pageQuestions() {
   setTitle('Questions à poser');
-  const a = S.questions.filter(q => !q.fait), f = S.questions.filter(q => q.fait);
+  // une question cochée (ou décochée) reste à sa place pendant la visite de la page ; elle change de partie quand on rouvre la page
+  const kSec = (location.hash || '') + '|questions-parties', prec = ORDRES[kSec] || {}, partie = {};
+  S.questions.forEach(q => { partie[q.id] = prec[q.id] || (q.fait ? 'f' : 'a'); }); ORDRES[kSec] = partie;
+  const a = S.questions.filter(q => partie[q.id] === 'a'), f = S.questions.filter(q => partie[q.id] === 'f');
   const carte = q => `<div class="card" style="margin-bottom:10px;${q.fait ? 'opacity:.75' : ''}"><div style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" ${q.fait ? 'checked' : ''} onchange="questionBascule('${q.id}',this.checked)" title="Cochée = question posée" style="margin-top:4px"><div style="flex:1"><div>${esc(q.texte)}</div>
     <div class="small muted" style="margin-top:4px">${q.pour ? esc(q.pour) + ' · ' : ''}notée le ${frDate(q.creeLe)}${q.lien ? ` · <a href="${q.lien}">voir la fiche</a>` : ''}</div>
     <textarea placeholder="Réponse obtenue…" style="width:100%;margin-top:6px;min-height:42px" onchange="questionReponse('${q.id}',this.value)">${esc(q.reponse || '')}</textarea></div><button class="btn sm ghost no-print" onclick="questionSupprimer('${q.id}')" title="Supprimer">✕</button></div></div>`;
