@@ -21,12 +21,15 @@ const L = { cle: 'cockpit-sync-cle', sel: 'cockpit-sync-sel', vu: 'cockpit-sync-
   copie: 'cockpit-pas-v1-copie-avant-synchro', copie2: 'cockpit-pas-v1-copie-avant-v2' };
 const DOC = 'etat-v2', ANCIEN = 'etat', ANCIEN_SAUVE = 'etat-ancien', PAUSE = 'en-pause-mettre-a-jour';
 const ITER = 600000;
-const VERSION = '2026-11-20a'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
+const VERSION = '2026-11-20b'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
 let distant = null; // { appareil, savedAt } du dernier bloc vu en ligne
+let ancienActif = null; // un appareil resté sur l'ancien code a enregistré : { appareil, savedAt }
+let appareils = {}; // liste des appareils connectés à la nouvelle synchro (doc « appareils »)
 const get = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const put = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
 const b64 = buf => { let s = ''; const a = new Uint8Array(buf); for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
 const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const monId = (() => { let i = get('cockpit-sync-appareil'); if (!i) { i = 'ap' + Math.random().toString(36).slice(2, 10); put('cockpit-sync-appareil', i); } return i; })();
 const savedAt = txt => { try { return JSON.parse(txt)._savedAt || ''; } catch { return ''; } };
 
 /* ---------- dernière version commune (sert à réunir les modifications de deux appareils) ---------- */
@@ -34,6 +37,8 @@ const savedAt = txt => { try { return JSON.parse(txt)._savedAt || ''; } catch { 
 function idb(mode, fn) {
   return new Promise((ok, ko) => {
     if (!window.indexedDB) return ko(new Error('pas d’IndexedDB'));
+    const minu = setTimeout(() => ko(new Error('IndexedDB ne répond pas')), 3000); // certains Safari ne répondent jamais : on n'attend pas
+    const ok0 = ok, ko0 = ko; ok = v => { clearTimeout(minu); ok0(v); }; ko = e => { clearTimeout(minu); ko0(e); };
     const r = indexedDB.open('cockpit-sync', 1);
     r.onupgradeneeded = () => r.result.createObjectStore('kv');
     r.onerror = () => ko(r.error);
@@ -120,7 +125,14 @@ async function dechiffrer(doc, raw) {
 const quand = t => { try { return t ? new Date(t).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '?'; } catch { return String(t); } };
 const echap = s => String(s ?? '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 let etat = 'off', message = '', utilisateur = null;
+const ancienMsg = () => `Un appareil a encore l'ancienne version (${ancienActif.appareil || '?'}, enregistré le ${quand(ancienActif.savedAt)}) : ce qu'il enregistre n'arrive pas ici. Mets-le à jour (voir la fenêtre Synchro).`;
+function ancienRegle() { // l'appareil a été mis à jour depuis : il apparaît avec la nouvelle version, après son dernier envoi à l'ancien emplacement
+  if (!ancienActif) return; const n = ancienActif.appareil;
+  if (Date.now() - Date.parse(ancienActif.savedAt || 0) > 864e5) { ancienActif = null; return; } // plus rien de cet appareil depuis un jour
+  if (Object.values(appareils).some(a => a && a.nom === n && a.vu > (ancienActif.savedAt || ''))) ancienActif = null;
+}
 function dire(e, m) {
+  ancienRegle(); if (ancienActif && (e === 'ok' || e === 'cours')) { e = 'err'; m = ancienMsg(); }
   etat = e; if (m != null) message = m;
   const t = { off: 'Synchro : non connectée', attente: 'Synchro : à configurer', cours: 'Synchro : en cours…', ok: 'Synchro : ✓ à jour', hors: 'Synchro : hors ligne', err: 'Synchro : ⚠ à vérifier' }[e];
   const b = document.getElementById('sync-pill'); if (b) { b.textContent = t; b.dataset.etat = e; }
@@ -162,7 +174,10 @@ function fenetre() {
         <button class="btn" type="button" id="sync-reset" hidden>J'ai oublié ma phrase : recommencer depuis cet appareil</button>
       </form>`}
     <p class="small" id="sync-msg" style="margin-top:10px">${echap(message)}</p>
-    <p class="small muted" style="margin:4px 0 0">Version ${VERSION}${distant ? ` · dernier envoi en ligne : ${echap(distant.appareil || '?')}, ${quand(distant.savedAt)}` : ''}</p>
+    <p class="small muted" style="margin:4px 0 0">Version ${VERSION} (code ${window.COCKPIT_CODE_SOURCE === 'github' ? 'pris sur GitHub' : 'de cet appareil'})${distant ? ` · dernier envoi en ligne : ${echap(distant.appareil || '?')}, ${quand(distant.savedAt)}` : ''}</p>
+    ${connecte && Object.keys(appareils).length ? `<div class="small" style="margin-top:8px"><b>Tes appareils</b>${Object.entries(appareils).sort((a, b) => String(b[1].vu).localeCompare(String(a[1].vu))).map(([id, a]) => `<div>${id === monId ? '▸ ' : ''}${echap(a.nom)} · version ${echap(a.version)}${a.version === VERSION ? ' ✓' : ' <b style="color:var(--bad,#c33)">ancienne</b>'} · vu le ${quand(a.vu)}${id === monId ? ' (cet appareil)' : ''}</div>`).join('')}</div>` : ''}
+    ${ancienActif ? `<p class="small" style="margin-top:8px;color:var(--bad,#c33)"><b>⚠ ${echap(ancienMsg())}</b></p>` : ''}
+    ${connecte ? `<details style="margin-top:10px"><summary class="small"><b>Cet appareil a les bonnes données : les envoyer à tous</b></summary><p class="small muted">Tes autres appareils prennent les données de celui-ci (ils gardent une copie des leurs, récupérable ici).</p><button class="btn sm" type="button" id="sync-imposer">Envoyer les données de cet appareil à tous</button></details>` : ''}
     ${copies.length ? `<details style="margin-top:10px"><summary class="small"><b>Revenir à une copie gardée sur cet appareil</b></summary>${copies.map((c, i) => `
       <div class="small" style="margin:8px 0;padding:8px;border:1px solid var(--line,#ddd);border-radius:8px">${echap(c.lib)} : <b>${quand(c.quand)}</b>, ${c.nb} élèves.
         ${c.plus.length ? `<div>En plus dans la copie : ${echap(c.plus.slice(0, 12).join(', '))}${c.plus.length > 12 ? '…' : ''}</div>` : ''}
@@ -176,6 +191,7 @@ function fenetre() {
   const rz = w.querySelector('#sync-reset'); if (rz) { rz.onclick = recommencer; rz.hidden = !enAttente; }
   const o = w.querySelector('#sync-out'); if (o) o.onclick = deconnecter;
   const m = w.querySelector('#sync-maint'); if (m) m.onclick = () => envoyer(true);
+  const im = w.querySelector('#sync-imposer'); if (im) im.onclick = () => { if (!im.dataset.ok) { im.dataset.ok = '1'; im.className = 'btn sm danger'; im.textContent = 'Confirmer : remplacer les données de tous mes appareils par celles-ci'; return; } w.remove(); imposer(); };
   // deux clics (les fenêtres de confirmation du navigateur peuvent être bloquées)
   w.querySelectorAll('[data-copie]').forEach(b => b.onclick = () => {
     const c = copies[+b.dataset.copie]; if (!c) return;
@@ -212,18 +228,29 @@ function ecouter(u) {
   utilisateur = u; pret = false;
   docRef = dossier(u).doc(DOC);
   dire('cours', 'Connectée avec ' + (u.email || '') + '.');
-  enFile(() => mettreAncienEnPause(u));
-  arret = docRef.onSnapshot(s => { if (s.metadata && s.metadata.hasPendingWrites) return; const d = s.data(); enFile(() => recevoir(d)); },
+  const a1 = docRef.onSnapshot(s => { if (s.metadata && s.metadata.hasPendingWrites) return; const d = s.data(); enFile(() => recevoir(d)); },
     () => dire('err', "Je n'arrive pas à lire ton espace Firebase (règles ?)."));
+  // un appareil resté sur l'ancien code écrit encore à l'ancien emplacement : on le signale, on garde ce qu'il a envoyé, on remet la pause
+  const a2 = dossier(u).doc(ANCIEN).onSnapshot(s => { const d = s.data(); if (d && d.data && d.sel !== PAUSE) enFile(() => mettreAncienEnPause(u, d)); }, () => {});
+  const a3 = dossier(u).doc('appareils').onSnapshot(s => { appareils = s.data() || {}; if (ancienActif) { ancienRegle(); if (!ancienActif) dire('ok', 'Tout est à jour.'); } }, () => {});
+  enFile(signaler);
+  arret = () => { a1(); a2(); a3(); };
+}
+// fiche de cet appareil (nom, version du code, dernier contact) : visible dans la fenêtre Synchro de tous les appareils
+async function signaler() {
+  if (!utilisateur) return;
+  try { await dossier(utilisateur).doc('appareils').set({ [monId]: { nom: nomAppareil(), version: VERSION, code: window.COCKPIT_CODE_SOURCE || 'local', vu: new Date().toISOString() } }, { merge: true }); } catch (e) { console.warn('appareils', e); }
 }
 // L'ancien emplacement (« etat ») servait aux anciennes versions du code. On en garde une copie (« etat-ancien »), puis on le
 // remplace par un bloc « en pause » : un appareil resté sur l'ancien code affiche « ⚠ à vérifier » et n'envoie plus rien.
-async function mettreAncienEnPause(u) {
+async function mettreAncienEnPause(u, d) {
   try {
-    const anc = dossier(u).doc(ANCIEN), d = (await anc.get()).data();
-    if (!d || d.sel === PAUSE) return;
+    const anc = dossier(u).doc(ANCIEN);
+    if (!d || d.sel === PAUSE || !d.data) return;
     const sauve = dossier(u).doc(ANCIEN_SAUVE);
-    if (!(await sauve.get()).exists && d.data) await sauve.set(d);
+    if (!(await sauve.get()).exists) await sauve.set(d); // état au moment du passage à la nouvelle synchro
+    else { await dossier(u).doc('etat-ancien-dernier').set(d); ancienActif = { appareil: d.appareil, savedAt: d.savedAt }; // envoyé ENSUITE par un appareil pas mis à jour
+      dire('err', `Un appareil a encore l'ancienne version (${d.appareil || '?'}, ${quand(d.savedAt)}) : ce qu'il enregistre n'arrive pas ici. Mets-le à jour.`); }
     await anc.set({ v: 1, sel: PAUSE, iv: '', data: 'pause', gz: false, savedAt: '', appareil: 'ANCIENNE VERSION : mets à jour cet appareil (nouveau code du 20/11)' });
   } catch (e) { console.warn('Ancien emplacement', e); }
 }
@@ -300,6 +327,11 @@ async function recevoir(d, essai = 0) {
   let p; try { p = await ouvrir(d, unb64(raw)); } catch { return dire('err', 'Impossible de déchiffrer : vérifie ta phrase secrète (déconnecte puis reconnecte cet appareil).'); }
   let texte; try { texte = new TextDecoder().decode(d.gz ? await decompresser(p) : p); } catch (e) { return dire('err', "La phrase est bonne, mais cet appareil n'arrive pas à décompresser les données (" + (e.message || e) + '). Vérifie la connexion internet puis recharge la page.'); }
   const dist = JSON.parse(texte);
+  if (d.remplace) { // « Envoyer les données de cet appareil à tous » sur un autre appareil : on prend tout (copie de celui-ci gardée)
+    if (local && sansDate(JSON.parse(local)) !== sansDate(dist)) put(L.copie, local);
+    appliquerRecu(dist); put(L.vu, d.savedAt); await baseEcrire(texte); apresApplication(d.savedAt);
+    return dire('ok', 'Données remplacées par celles de ' + (d.appareil || "l'autre appareil") + ' (copie de cet appareil gardée).');
+  }
   if (!vu || !local) { // premier passage de cet appareil sur la nouvelle synchro : ce qui est en ligne fait foi (copie de cet appareil gardée)
     if (local && sansDate(JSON.parse(local)) !== sansDate(dist)) put(L.copie2, local);
     appliquerRecu(dist); put(L.vu, d.savedAt); await baseEcrire(texte); apresApplication(d.savedAt);
@@ -338,8 +370,19 @@ async function envoyerMaintenant(force, essai = 0) {
       t.set(docRef, doc);
     });
     if (autre) return essai < 3 ? recevoir(autre) : dire('err', 'Plusieurs appareils enregistrent en même temps : réessaie dans un instant.');
-    put(L.vu, at); await baseEcrire(local); dire('ok', 'Tout est à jour.');
+    put(L.vu, at); await baseEcrire(local); dire('ok', 'Tout est à jour.'); signaler();
   } catch (e) { dire(navigator.onLine ? 'err' : 'hors', navigator.onLine ? "L'envoi a échoué : " + (e.code || e.message || '') : 'Hors ligne : ce sera envoyé au retour de la connexion.'); }
+}
+// l'appareil qui a les bonnes données les impose à tous les autres (qui gardent une copie des leurs)
+function imposer() {
+  return enFile(async () => {
+    const raw = get(L.cle), local = get(APP().cle); if (!docRef || !raw || !local) return dire('err', "Cet appareil n'est pas connecté ou n'a pas de données.");
+    const o = JSON.parse(local); o._savedAt = new Date().toISOString(); const txt = JSON.stringify(o);
+    applique = true; try { localStorage.setItem(APP().cle, txt); } finally { applique = false; }
+    const c = await chiffrer(txt, unb64(raw));
+    await docRef.set({ v: 2, sel: get(L.sel), iv: c.iv, data: c.data, gz: c.gz, savedAt: o._savedAt, appareil: nomAppareil(), version: VERSION, remplace: true });
+    put(L.vu, o._savedAt); await baseEcrire(txt); dire('ok', 'Les données de cet appareil sont envoyées à tous tes appareils.'); signaler();
+  });
 }
 function planifier() { clearTimeout(minuterie); minuterie = setTimeout(() => envoyer(), 2000); }
 // Chaque enregistrement du cockpit part (chiffré) quelques secondes plus tard
