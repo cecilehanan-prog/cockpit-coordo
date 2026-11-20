@@ -11,7 +11,15 @@
    - Maintenant : quand deux appareils ont changé, on RÉUNIT les deux (élève par élève, champ par champ, à partir de la
      dernière version commune). Rien n'est effacé sauf ce qui a vraiment été supprimé.
    - Nouvel emplacement en ligne (« etat-v2 ») : les appareils qui ont encore l'ancien code ne peuvent plus rien écraser.
-     L'ancien emplacement est mis en pause (copie gardée dans « etat-ancien »), ces appareils affichent « ⚠ à vérifier ». */
+     L'ancien emplacement est mis en pause (copie gardée dans « etat-ancien »), ces appareils affichent « ⚠ à vérifier ».
+
+   Version 2026-11-20f : « Synchro OK » reste OK toute seule.
+   - Un appareil resté sur l'ancien code ne fait plus passer CET appareil en « ⚠ à vérifier » (ses ajouts sont repris ;
+     l'information reste dans la fenêtre Synchro).
+   - Mise en veille, réveil, coupure réseau, onglet laissé ouvert : la synchro revérifie toute seule (au retour sur l'appli, au
+     réveil de l'ordinateur, au retour du réseau, et toutes les 4 minutes), relance la connexion Firebase si elle s'est figée,
+     et réessaie un envoi raté (5 s, 20 s, 1 min, puis toutes les 2 min). « ⚠ à vérifier » ne s'affiche plus que si le
+     problème dure (plus de 3 essais ratés de suite avec internet) ou s'il faut une action (phrase secrète, clé changée). */
 (() => {
 'use strict';
 const CFG = window.COCKPIT_FIREBASE;
@@ -21,7 +29,7 @@ const L = { cle: 'cockpit-sync-cle', sel: 'cockpit-sync-sel', vu: 'cockpit-sync-
   copie: 'cockpit-pas-v1-copie-avant-synchro', copie2: 'cockpit-pas-v1-copie-avant-v2' };
 const DOC = 'etat-v2', ANCIEN = 'etat', ANCIEN_SAUVE = 'etat-ancien', PAUSE = 'en-pause-mettre-a-jour';
 const ITER = 600000;
-const VERSION = '2026-11-20e'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
+const VERSION = '2026-11-20f'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
 let distant = null; // { appareil, savedAt } du dernier bloc vu en ligne
 // journal de la synchro (visible dans la fenêtre Synchro, gardé sur l'appareil) : dit exactement où ça en est
 let etape = '';
@@ -29,6 +37,7 @@ const JOURNAL = (() => { try { return JSON.parse(localStorage.getItem('cockpit-s
 function noter(txt) { etape = txt; JOURNAL.push({ t: new Date().toISOString(), txt: String(txt).slice(0, 200) }); if (JOURNAL.length > 40) JOURNAL.splice(0, JOURNAL.length - 40); try { localStorage.setItem('cockpit-sync-journal', JSON.stringify(JOURNAL)); } catch {} }
 // rien ne doit pouvoir attendre indéfiniment (réseau, IndexedDB, chargement d'un script…)
 const delai = (p, ms, quoi) => new Promise((ok, ko) => { const t = setTimeout(() => ko(new Error(quoi + ' : pas de réponse au bout de ' + Math.round(ms / 1000) + ' s')), ms); Promise.resolve(p).then(v => { clearTimeout(t); ok(v); }, e => { clearTimeout(t); ko(e); }); });
+let echecs = 0, premierEchec = 0, relanceMinu = 0, dernierOK = 0, derniereVerif = 0; // auto-réparation : essais ratés de suite, relance prévue
 let ancienActif = null; // un appareil resté sur l'ancien code a enregistré : { appareil, savedAt }
 let appareils = {}; // liste des appareils connectés à la nouvelle synchro (doc « appareils »)
 const get = k => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -143,7 +152,8 @@ function ancienRegle() { // l'appareil a été mis à jour depuis : il apparaît
   if (Object.values(appareils).some(a => a && a.nom === n && a.vu > (ancienActif.savedAt || ''))) ancienActif = null;
 }
 function dire(e, m) {
-  ancienRegle(); if (ancienActif && (e === 'ok' || e === 'cours')) { e = 'err'; m = ancienMsg(); }
+  ancienRegle();
+  if (e === 'ok') { echecs = 0; clearTimeout(relanceMinu); relanceMinu = 0; dernierOK = Date.now(); }
   etat = e; if (m != null) message = m;
   const t = { off: 'Synchro : non connectée', attente: 'Synchro : à configurer', cours: 'Synchro : en cours…', ok: 'Synchro : ✓ à jour', hors: 'Synchro : hors ligne', err: 'Synchro : ⚠ à vérifier' }[e];
   const b = document.getElementById('sync-pill'); if (b) { b.textContent = t; b.dataset.etat = e; }
@@ -164,6 +174,12 @@ function copiesGardees() {
     const n = noms(s), plus = [...n].filter(x => !nc.has(x)), moins = [...nc].filter(x => !n.has(x));
     return { k, lib, s, quand: s._savedAt, nb: n.size, plus, moins };
   }).filter(Boolean);
+}
+// un même appareil peut apparaître plusieurs fois (données du navigateur effacées) : on ne montre que sa dernière apparition, et rien de plus vieux que 30 jours
+function appareilsVisibles() {
+  const L = Object.entries(appareils).filter(([id, a]) => a && a.vu && (id === monId || Date.now() - Date.parse(a.vu) < 30 * 864e5)).sort((a, b) => String(b[1].vu).localeCompare(String(a[1].vu)));
+  const cle = a => (a.nom || '') + '|' + (a.code || ''), moi = L.find(([id]) => id === monId), vus = new Set(moi ? [cle(moi[1])] : []);
+  return L.filter(([id, a]) => { if (id === monId) return true; if (vus.has(cle(a))) return false; vus.add(cle(a)); return true; });
 }
 function fenetre() {
   const ex = document.getElementById('sync-modal'); if (ex) ex.remove();
@@ -186,7 +202,7 @@ function fenetre() {
       </form>`}
     <p class="small" id="sync-msg" style="margin-top:10px">${echap(message)}</p>
     <p class="small muted" style="margin:4px 0 0">Version ${VERSION} (code ${window.COCKPIT_CODE_SOURCE === 'github' ? 'pris sur GitHub' : 'de cet appareil'})${distant ? ` · dernier envoi en ligne : ${echap(distant.appareil || '?')}, ${quand(distant.savedAt)}` : ''}</p>
-    ${connecte && Object.keys(appareils).length ? `<div class="small" style="margin-top:8px"><b>Tes appareils</b>${Object.entries(appareils).sort((a, b) => String(b[1].vu).localeCompare(String(a[1].vu))).map(([id, a]) => `<div>${id === monId ? '▸ ' : ''}${echap(a.nom)} · version ${echap(a.version)}${a.version === VERSION ? ' ✓' : ' <b style="color:var(--bad,#c33)">ancienne</b>'} · vu le ${quand(a.vu)}${id === monId ? ' (cet appareil)' : ''}</div>`).join('')}</div>` : ''}
+    ${connecte && Object.keys(appareils).length ? `<div class="small" style="margin-top:8px"><b>Tes appareils</b>${appareilsVisibles().map(([id, a]) => `<div>${id === monId ? '▸ ' : ''}${echap(a.nom)} · version ${echap(a.version)}${a.version === VERSION ? ' ✓' : ' <b style="color:var(--bad,#c33)">ancienne</b>'} · vu le ${quand(a.vu)}${id === monId ? ' (cet appareil)' : ''}</div>`).join('')}</div>` : ''}
     ${ancienActif ? `<p class="small" style="margin-top:8px;color:var(--bad,#c33)"><b>⚠ ${echap(ancienMsg())}</b></p>` : ''}
     ${connecte ? `<details style="margin-top:10px"><summary class="small"><b>Cet appareil a les bonnes données : les envoyer à tous</b></summary><p class="small muted">Tes autres appareils prennent les données de celui-ci (ils gardent une copie des leurs, récupérable ici).</p><button class="btn sm" type="button" id="sync-imposer">Envoyer les données de cet appareil à tous</button></details>` : ''}
     ${copies.length ? `<details style="margin-top:10px"><summary class="small"><b>Revenir à une copie gardée sur cet appareil</b></summary>${copies.map((c, i) => `
@@ -202,7 +218,7 @@ function fenetre() {
   const f = w.querySelector('#sync-form'); if (f) f.onsubmit = e => { e.preventDefault(); connecter(f.querySelector('#sync-mail').value.trim(), f.querySelector('#sync-mdp').value, f.querySelector('#sync-phrase').value); };
   const rz = w.querySelector('#sync-reset'); if (rz) { rz.onclick = recommencer; rz.hidden = !enAttente; }
   const o = w.querySelector('#sync-out'); if (o) o.onclick = deconnecter;
-  const m = w.querySelector('#sync-maint'); if (m) m.onclick = () => envoyer(true);
+  const m = w.querySelector('#sync-maint'); if (m) m.onclick = () => { echecs = 0; verifier('demandé', true); };
   const im = w.querySelector('#sync-imposer'); if (im) im.onclick = () => { if (!im.dataset.ok) { im.dataset.ok = '1'; im.className = 'btn sm danger'; im.textContent = 'Confirmer : remplacer les données de tous mes appareils par celles-ci'; return; } w.remove(); imposer(); };
   // deux clics (les fenêtres de confirmation du navigateur peuvent être bloquées)
   w.querySelectorAll('[data-copie]').forEach(b => b.onclick = () => {
@@ -222,7 +238,30 @@ const charger = src => new Promise((ok, ko) => { const s = document.createElemen
 const dossier = u => firebase.firestore().collection('coffres').doc(u.uid).collection('cockpit');
 // une seule opération à la fois (réception, réunion, envoi) : rien ne se croise
 let file = Promise.resolve();
-const enFile = fn => (file = file.then(() => delai(fn(), 150000, 'Synchro bloquée'), () => delai(fn(), 150000, 'Synchro bloquée')).catch(e => { noter('ERREUR ' + (etape ? '[' + etape + '] ' : '') + (e && (e.code || e.message) || e)); console.warn('Synchro', e);  dire('err', 'Erreur de synchro' + (etape ? ' (étape : ' + etape + ')' : '') + ' : ' + (e && (e.code || e.message) || e)); }));
+const enFile = fn => (file = file.then(() => delai(fn(), 150000, 'Synchro bloquée'), () => delai(fn(), 150000, 'Synchro bloquée')).catch(e => { noter('ERREUR ' + (etape ? '[' + etape + '] ' : '') + (e && (e.code || e.message) || e)); console.warn('Synchro', e);  incident('Erreur de synchro' + (etape ? ' (étape : ' + etape + ')' : '') + ' : ' + (e && (e.code || e.message) || e)); }));
+// Problème passager (réseau, veille, Firebase lent) : on réessaie tout seul. « ⚠ à vérifier » seulement si ça dure.
+const PAUSES = [5000, 20000, 60000, 120000];
+function incident(msg) {
+  if (!echecs) premierEchec = Date.now(); echecs++; noter('incident n° ' + echecs + ' : ' + msg + ' → nouvel essai automatique');
+  if (!navigator.onLine) dire('hors', 'Hors ligne : tes données restent enregistrées sur cet appareil, elles partiront au retour de la connexion.');
+  else if (echecs > 3 && Date.now() - premierEchec > 150000) dire('err', msg + ' (nouvel essai automatique toutes les 2 minutes ; « Synchroniser maintenant » pour réessayer tout de suite)');
+  else dire('cours', 'Reconnexion en cours…');
+  clearTimeout(relanceMinu); relanceMinu = setTimeout(() => { relanceMinu = 0; verifier('nouvel essai', echecs > 1); }, PAUSES[Math.min(echecs - 1, PAUSES.length - 1)]);
+}
+// Revérifie l'état en ligne (lecture directe du serveur) : reçoit ce qui manque, envoie ce qui n'est pas parti.
+// relancer = true : la connexion Firebase est d'abord coupée puis rouverte (elle peut rester figée après une mise en veille).
+function verifier(raison, relancer) {
+  if (!utilisateur || !get(L.cle) || !auth || !APP()) return;
+  derniereVerif = Date.now();
+  return enFile(async () => {
+    noter('vérification (' + raison + ')');
+    if (relancer) { try { const db = firebase.firestore(); await delai(db.disableNetwork(), 10000, 'Coupure Firebase'); await delai(db.enableNetwork(), 10000, 'Relance Firebase'); } catch (e) { noter('relance Firebase : ' + (e.message || e)); } }
+    if (!docRef) { ecouter(utilisateur); return; }
+    const d = (await delai(docRef.get({ source: 'server' }), 30000, 'Vérification en ligne')).data();
+    pret = true; clearTimeout(attenteMinu);
+    await recevoir(d);
+  });
+}
 async function demarrer() {
   bouton();
   if (!CFG) { dire('attente', 'La synchro sera prête dès que ton espace Firebase sera branché.'); return; }
@@ -244,12 +283,12 @@ function ecouter(u) {
   utilisateur = u; pret = false;
   docRef = dossier(u).doc(DOC);
   noter('connectée, attente des données en ligne'); dire('cours', 'Connectée avec ' + (u.email || '') + ' : attente des données en ligne…');
-  clearTimeout(attenteMinu); attenteMinu = setTimeout(() => { if (!pret) { noter('aucune réponse de Firebase après 30 s'); dire('err', "Firebase ne répond pas depuis 30 s (connexion internet, ou bloqueur de contenu dans le navigateur ?). Recharge la page."); } }, 30000);
+  clearTimeout(attenteMinu); attenteMinu = setTimeout(() => { if (!pret) { noter('aucune réponse de Firebase après 30 s'); incident("Firebase ne répond pas (connexion internet ?)"); } }, 30000);
   const a1 = docRef.onSnapshot(s => { if (s.metadata && s.metadata.hasPendingWrites) return; if (s.metadata && s.metadata.fromCache && !s.exists) return; /* pas encore la réponse du serveur : on ne conclut pas « espace vide » */ const d = s.data(); enFile(() => recevoir(d)); },
-    () => dire('err', "Je n'arrive pas à lire ton espace Firebase (règles ?)."));
+    e => { noter('écoute interrompue : ' + (e && (e.code || e.message) || e)); if (arret) { arret(); arret = null; } docRef = null; incident("Lecture de ton espace Firebase interrompue (" + (e && (e.code || e.message) || e) + ')'); });
   // un appareil resté sur l'ancien code écrit encore à l'ancien emplacement : on le signale, on garde ce qu'il a envoyé, on remet la pause
   const a2 = dossier(u).doc(ANCIEN).onSnapshot(s => { const d = s.data(); if (d && d.data && d.sel !== PAUSE) enFile(() => mettreAncienEnPause(u, d)); }, () => {});
-  const a3 = dossier(u).doc('appareils').onSnapshot(s => { appareils = s.data() || {}; if (ancienActif) { ancienRegle(); if (!ancienActif) dire('ok', 'Tout est à jour.'); } }, () => {});
+  const a3 = dossier(u).doc('appareils').onSnapshot(s => { appareils = s.data() || {}; if (ancienActif) ancienRegle(); }, () => {});
   signaler(); // hors de la file : ne retarde jamais la réception
   arret = () => { a1(); a2(); a3(); };
 }
@@ -290,7 +329,7 @@ async function mettreAncienEnPause(u, d) {
       const derRef = dossier(u).doc('etat-ancien-dernier'), prec = (await delai(derRef.get(), 20000, 'Ancien emplacement')).data();
       if (!(prec && prec.savedAt === d.savedAt && prec.data === d.data)) await reprendreAncien(d, prec);
       await ecrire(derRef, d, 'Ancien emplacement');
-      if (Date.now() - Date.parse(d.savedAt || 0) < 3 * 3600e3) { ancienActif = { appareil: d.appareil, savedAt: d.savedAt }; dire('err', ancienMsg()); } }
+      if (Date.now() - Date.parse(d.savedAt || 0) < 3 * 3600e3) { ancienActif = { appareil: d.appareil, savedAt: d.savedAt }; noter('info : ' + ancienMsg()); } }
     await ecrire(anc, { v: 1, sel: PAUSE, iv: '', data: 'pause', gz: false, savedAt: '', appareil: 'ANCIENNE VERSION : mets à jour cet appareil (nouveau code du 20/11)' }, 'Ancien emplacement');
   } catch (e) { console.warn('Ancien emplacement', e); }
 }
@@ -354,7 +393,8 @@ async function brancher(u, ref, raw, sel) {
 // Phrase oubliée : on repart de CET appareil, avec la nouvelle phrase (l'ancien bloc chiffré en ligne est remplacé)
 async function recommencer() {
   if (!enAttente) return;
-  if (!confirm("Recommencer avec cette nouvelle phrase ?\n\nLes données de CET appareil deviendront la référence pour tous tes appareils. Fais-le depuis ton Mac, qui a les bonnes données.")) return;
+  const q = "Recommencer avec cette nouvelle phrase ?\n\nLes données de CET appareil deviendront la référence pour tous tes appareils. Fais-le depuis ton Mac, qui a les bonnes données.";
+  if (!(await (window.demander ? window.demander(q, { ok: 'Recommencer', danger: true }) : Promise.resolve(confirm(q))))) return;
   const { u, ref, phrase } = enAttente;
   dire('cours', 'Préparation de la nouvelle clé…');
   const sel = crypto.getRandomValues(new Uint8Array(16)), raw = await deriver(phrase, sel);
@@ -388,7 +428,7 @@ async function recevoir(d, essai = 0) {
   // il y a du nouveau en ligne
   noter('déchiffrement');
   let p; try { p = await ouvrir(d, unb64(raw)); } catch { return dire('err', 'Impossible de déchiffrer : vérifie ta phrase secrète (déconnecte puis reconnecte cet appareil).'); }
-  let texte; try { texte = new TextDecoder().decode(d.gz ? await delai(decompresser(p), 20000, 'Décompression') : p); } catch (e) { return dire('err', "La phrase est bonne, mais cet appareil n'arrive pas à décompresser les données (" + (e.message || e) + '). Vérifie la connexion internet puis recharge la page.'); }
+  let texte; try { texte = new TextDecoder().decode(d.gz ? await delai(decompresser(p), 20000, 'Décompression') : p); } catch (e) { return incident("Décompression des données reçues impossible pour l'instant (" + (e.message || e) + ')'); }
   const dist = JSON.parse(texte);
   noter('application des données reçues');
   if (d.remplace) { // « Envoyer les données de cet appareil à tous » sur un autre appareil : on prend tout (copie de celui-ci gardée)
@@ -434,9 +474,9 @@ async function envoyerMaintenant(force, essai = 0, ecraser = false) {
     if (!ecraser && d && d.data && d.savedAt !== vu && d.savedAt !== at && !(d.savedAt < vu && dejaEnvoye(d.savedAt))) autre = d;
     else { noter('envoi en cours (' + Math.round(c.data.length / 1024) + ' Ko' + (c.gz ? ', compressé' : '') + ')'); retenirEnvoi(at); await ecrire(docRef, doc, 'Envoi'); }
     noter(autre ? 'une version plus récente est en ligne : réunion' : 'envoyé');
-    if (autre) return essai < 3 ? recevoir(autre) : dire('err', 'Plusieurs appareils enregistrent en même temps : réessaie dans un instant.');
+    if (autre) return essai < 3 ? recevoir(autre) : incident('Plusieurs appareils enregistrent en même temps');
     put(L.vu, at); await baseEcrire(local); dire('ok', 'Tout est à jour.'); signaler();
- } catch (e) { noter('envoi non abouti : ' + (e.code || e.message || e)); dire(navigator.onLine ? 'err' : 'hors', navigator.onLine ? "L'envoi a échoué : " + (e.code || e.message || '') : 'Hors ligne : ce sera envoyé au retour de la connexion.'); }
+ } catch (e) { noter('envoi non abouti : ' + (e.code || e.message || e)); incident("L'envoi n'a pas abouti (" + (e.code || e.message || '') + ')'); }
 }
 // l'appareil qui a les bonnes données les impose à tous les autres (qui gardent une copie des leurs)
 function imposer() {
@@ -457,7 +497,18 @@ Storage.prototype.setItem = function (k, v) {
   setItem.call(this, k, v);
   if (this === window.localStorage && APP() && k === APP().cle && !applique) planifier();
 };
-addEventListener('online', () => envoyer());
+// Retour sur l'appli, réveil de l'ordinateur, retour du réseau, et contrôle régulier : la synchro se revérifie toute seule
+addEventListener('online', () => { echecs = 0; verifier('retour du réseau', true); });
+addEventListener('offline', () => { if (utilisateur && get(L.cle)) dire('hors', 'Hors ligne : tes données restent enregistrées sur cet appareil, elles partiront au retour de la connexion.'); });
+const auRetour = raison => { if (document.hidden) return; if (Date.now() - derniereVerif > 45000) verifier(raison, Date.now() - dernierOK > 10 * 60000); };
+document.addEventListener('visibilitychange', () => auRetour("retour sur l'appli"));
+addEventListener('focus', () => auRetour("retour sur l'appli"));
+addEventListener('pageshow', () => auRetour('page réaffichée'));
+let tic = Date.now();
+setInterval(() => { const n = Date.now(), dort = n - tic > 90000; tic = n; // l'ordinateur s'est mis en veille : les minuteries étaient arrêtées
+  if (dort) { echecs = 0; verifier("réveil de l'appareil", true); }
+  else if (n - derniereVerif > 4 * 60000 && !relanceMinu) verifier('contrôle régulier', etat === 'err');
+}, 15000);
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', demarrer); else demarrer();
 window.cockpitSyncTest = { chiffrer, dechiffrer, deriver, reunirEtats };
 })();

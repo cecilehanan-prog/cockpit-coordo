@@ -103,9 +103,9 @@ window.essMarquer = (lundi, aid, oui) => { const m = essMessages(lundi).find(x =
 window.essMailTous = async lundi => {
   const L = essMessages(lundi).filter(m => m.etat !== 'envoye' && !absente(m.a) && m.a.email);
   if (!L.length) return toast('Aucun message à envoyer');
-  if (!confirm(`Ouvrir ${L.length} brouillon${L.length > 1 ? 's' : ''} d'e-mail (un par AESH) dans ta messagerie ? Vérifie que ton compte académique est le compte d'envoi.`)) return;
+  if (!(await demander(`Ouvrir ${L.length} brouillon${L.length > 1 ? 's' : ''} d'e-mail (un par AESH) dans ta messagerie ? Vérifie que ton compte académique est le compte d'envoi.`))) return;
   for (const m of L) { const a = document.createElement('a'); a.href = `mailto:${m.a.email}?subject=${encodeURIComponent(m.sujet)}&body=${encodeURIComponent(m.corps)}`; document.body.appendChild(a); a.click(); a.remove(); await new Promise(r => setTimeout(r, 1500)); }
-  if (confirm('Une fois les e-mails envoyés depuis ta messagerie, les marquer comme « envoyés » ici ?')) { L.forEach(m => { S.essRappels[lundi] = S.essRappels[lundi] || {}; S.essRappels[lundi][m.a.id] = { le: new Date().toISOString(), sig: m.sig }; }); commit('ess', `Rappels d'ESS envoyés par e-mail à ${L.length} AESH (semaine du ${frDate(lundi)})`); }
+  if (await demander('Une fois les e-mails envoyés depuis ta messagerie, les marquer comme « envoyés » ici ?', { ok: 'Marquer envoyés', annuler: 'Pas encore' })) { L.forEach(m => { S.essRappels[lundi] = S.essRappels[lundi] || {}; S.essRappels[lundi][m.a.id] = { le: new Date().toISOString(), sig: m.sig }; }); commit('ess', `Rappels d'ESS envoyés par e-mail à ${L.length} AESH (semaine du ${frDate(lundi)})`); }
 };
 window.essMail = (lundi, aid) => { const m = essMessages(lundi).find(x => x.a.id === aid); if (!m) return; location.href = `mailto:${m.a.email || ''}?subject=${encodeURIComponent(m.sujet)}&body=${encodeURIComponent(m.corps)}`; };
 let essVue = null;
@@ -533,6 +533,7 @@ function migrate(s) {
   for (const k of ['aesh', 'eleves', 'classes', 'affectations', 'creneaux', 'journal', 'archives']) s[k] = s[k] || [];
   s.aesh.forEach(a => { a.statut = a.statut || 'Actif'; a.heuresAutres = a.heuresAutres ?? null; a.email = a.email || ''; a.hs = a.hs || { autorise: 0, depuis: '', mouvements: [] }; if (a.dispositif === undefined) a.dispositif = /SEGPA/i.test(a.remarques || '') ? 'SEGPA' : /ULIS/i.test(a.remarques || '') ? 'ULIS' : ''; });
   s.absences = s.absences || [];
+  if (!s.coordoInit) { s.coordoInit = true; const co = s.aesh.filter(a => a.id === 'a9' && /^C[ée]cile\b/i.test(a.nom || '')); if (co.length === 1 && co[0].heuresCoordo == null) co[0].heuresCoordo = 1; } // 20/11 : 1 h de coordination (fiche AESH de la coordinatrice)
   s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
   s.questions = s.questions || [];
   // questions ajoutées par Claude : chaque question n'est ajoutée qu'une fois (suivi dans questionsAjoutees), ce que Cécile supprime ou coche n'est pas recréé
@@ -550,7 +551,7 @@ function migrate(s) {
   DOUBLONS_FUSIONNES = fusionnerDoublons(s);
   return s;
 }
-function save() { S._savedAt = new Date().toISOString(); const txt = JSON.stringify(S);
+function save() { reunirSyncEnAttente(); S._savedAt = new Date().toISOString(); const txt = JSON.stringify(S);
   try { localStorage.setItem(KEY, txt); }
   catch (err) { // mémoire du navigateur pleine : on allège le journal puis on réessaie ; sinon on le dit clairement
     if (S.journal && S.journal.length > 200) { S.journal.length = 200; try { localStorage.setItem(KEY, JSON.stringify(S)); toast('Journal raccourci pour libérer de la place'); } catch (e2) { return erreurEnregistrement(e2); } }
@@ -559,7 +560,12 @@ function save() { S._savedAt = new Date().toISOString(); const txt = JSON.string
 function log(type, texte) { S.journal.unshift({ date: new Date().toISOString(), type, texte }); if (S.journal.length > 2000) S.journal.length = 2000; }
 function erreurEnregistrement(err) { console.error(err); const f = document.getElementById('savestate'); if (f) f.textContent = '⚠ Non enregistré';
   alert("Attention : la modification est affichée mais n'a pas pu être enregistrée sur cet appareil (" + (err && (err.name || err.message) || err) + ").\nFais « Données & exports › Exporter JSON » pour ne rien perdre, puis préviens Claude."); }
-function commit(type, texte) { if (texte) log(type, texte); save(); render(); }
+function commit(type, texte) { if (texte) log(type, texte); save(); if (enChangement) renduBientot(); else render(); }
+// 20/11 : quand une modification vient d'un champ (heures, menu…), la page est redessinée juste après (le temps que le curseur
+// arrive dans le champ suivant) : rien ne bouge sous le curseur, et le champ suivant garde la main.
+let enChangement = false, renduPrevu = 0;
+document.addEventListener('change', () => { enChangement = true; setTimeout(() => { enChangement = false; }, 0); }, true);
+function renduBientot() { if (renduPrevu) return; renduPrevu = setTimeout(() => { renduPrevu = 0; render(); }, 0); }
 window.printEdt = id => {
   const a = aesh(id); if (!a) return;
   const affs = affOfAesh(a).map(x => ({ ...x, e: eleve(x.eleveId) })).sort((p, q) => q.heures - p.heures);
@@ -625,6 +631,25 @@ const aeshGroup = a => absente(a) ? 3 : /ULIS/i.test(a.remarques || '') ? 1 : /S
 const nomFamille = a => a.nom.split(' ').slice(1).join(' ') || a.nom;
 const sortAesh = list => list.slice().sort((a, b) => aeshGroup(a) - aeshGroup(b) || nomFamille(a).localeCompare(nomFamille(b), 'fr'));
 const toast = m => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = m; document.body.appendChild(t); setTimeout(() => t.remove(), 2200); };
+/* 20/11 : fenêtres de confirmation et de saisie DANS l'appli. Les fenêtres du navigateur (confirm, prompt, alert) sont bloquées
+   sur certains appareils (appli installée, Safari) : le bouton semblait alors « ne rien faire ». Plus aucun bouton n'en dépend. */
+function boite({ texte, ok = 'OK', annuler = 'Annuler', danger = false, champ = null }) {
+  return new Promise(fin => {
+    const w = document.createElement('div'); w.className = 'modal-bg no-print boite-ui'; w.style.zIndex = 95;
+    w.innerHTML = `<div class="modal" role="alertdialog" style="width:min(480px,94vw)"><div style="white-space:pre-line;line-height:1.45">${esc(texte)}</div>${champ ? `<input type="text" class="boite-champ" autocomplete="off" style="width:100%;margin-top:10px">` : ''}<div class="acts">${annuler ? `<button type="button" class="btn" data-r="0">${esc(annuler)}</button>` : ''}<button type="button" class="btn ${danger ? 'danger' : 'primary'}" data-r="1">${esc(ok)}</button></div></div>`;
+    const i = w.querySelector('.boite-champ'); if (i) i.value = champ.defaut == null ? '' : String(champ.defaut);
+    let fait = false;
+    const rep = oui => { if (fait) return; fait = true; w.remove(); document.removeEventListener('keydown', touche, true); fin(champ ? (oui ? i.value : null) : oui); setTimeout(appliquerSyncEnAttente, 0); };
+    function touche(ev) { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); rep(false); } else if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); rep(!(ev.target && ev.target.dataset && ev.target.dataset.r === '0')); } }
+    w.querySelectorAll('[data-r]').forEach(b => b.onclick = () => rep(b.dataset.r === '1'));
+    document.addEventListener('keydown', touche, true);
+    document.body.appendChild(w); const f = i || w.querySelector('[data-r="1"]'); f.focus(); if (i) i.select();
+  });
+}
+const demander = (texte, o = {}) => boite({ texte, ...o });
+const saisir = (texte, defaut = '', o = {}) => boite({ texte, champ: { defaut }, ...o });
+window.demander = demander; window.saisir = saisir; window.toast = toast;
+window.alert = m => { boite({ texte: String(m ?? ''), annuler: null }); };
 const dl = (name, content, type = 'application/json') => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 500); };
 const isPending = e => /^Dossier|^Renouvellement|^Vigilance/.test(e.statut);
 const isActive = e => !e.archive && e.statut !== 'Sorti / fin de notification';
@@ -669,12 +694,12 @@ function charge(a) {
   const list = affOfAesh(a).filter(x => !dispositifDe(eleve(x.eleveId))); // les heures ULIS / SEGPA sont déjà dans heuresAutres
   const ind = list.filter(x => eleve(x.eleveId).type === 'Individuel').reduce((s, x) => s + (x.heures || 0), 0);
   const mut = list.filter(x => eleve(x.eleveId).type === 'Mutualisé').reduce((s, x) => s + (x.heures || 0), 0);
-  const autres = a.heuresAutres || 0;
-  const tot = ind + mut + autres, q = a.quotite;
+  const autres = a.heuresAutres || 0, coordo = a.heuresCoordo || 0; // heures de coordination : travaillées, donc pas « disponibles »
+  const tot = ind + mut + autres + coordo, q = a.quotite;
   let k = 'neutral', l = 'Quotité manquante';
   const aut = (a.hs && a.hs.autorise) || 0; // dépassement de quotité autorisé (heures par semaine)
   if (q != null) { if (tot > q + aut) { k = 'bad'; l = 'Dépassement'; } else if (tot > q) { k = 'warn'; l = 'Heures sup. autorisées'; } else if (q - tot > 0) { k = 'warn'; l = 'Quotité non atteinte'; } else { k = 'ok'; l = '✓'; } }
-  return { hsAut: q != null && tot > q && tot <= q + aut, ind, mut, autres, tot, reste: q == null ? null : q - tot, taux: q ? tot / q : null, n: list.filter(x => x.heures > 0).length, k, l };
+  return { hsAut: q != null && tot > q && tot <= q + aut, ind, mut, autres, coordo, tot, reste: q == null ? null : q - tot, taux: q ? tot / q : null, n: list.filter(x => x.heures > 0).length, k, l };
 }
 const elevesDe = c => S.eleves.filter(e => isActive(e) && e.classe === c.nom);
 function stats(list) {
@@ -701,6 +726,7 @@ function couvertureAnnuelle() {
 }
 // Heures qu'une AESH de dispositif donne à la voie ordinaire : ULIS = quotité − heures collectives ULIS (ex. 26 − 16 = 10 h) ;
 // SEGPA = seulement les heures déjà attribuées à des élèves en voie ordinaire (aucune pour l'instant)
+const COULEUR_COORDO = '#E0A526';
 const versOrdinaire = a => affOfAesh(a).filter(x => !dispositifDe(eleve(x.eleveId))).reduce((t, x) => t + (x.heures || 0), 0);
 const capaciteOrdinaire = a => a.dispositif === 'ULIS' ? Math.max(versOrdinaire(a), (a.quotite || 0) - (a.heuresAutres || 0)) : versOrdinaire(a);
 // Volume annuel pour la voie ordinaire : quotité des AESH hors dispositif (sauf longue durée) + part ordinaire des AESH ULIS / SEGPA
@@ -881,6 +907,7 @@ function pageSyntheseAesh() {
       { l: 'Individuel', v: c.ind, c: 'var(--indiv)' },
       { l: 'Mutualisé', v: c.mut, c: 'var(--mutu)' },
       ...(c.autres ? [{ l: 'Collectif', v: c.autres, c: '#8A93A6' }] : []),
+      ...(c.coordo ? [{ l: 'Coordo', v: c.coordo, c: COULEUR_COORDO }] : []),
       ...(c.reste != null && c.reste > 0 ? [{ l: 'Disponible', v: c.reste, c: '#E3E7ED' }] : [])
     ];
     return `<div class="card aesh-synth-page" style="margin-bottom:16px">
@@ -908,7 +935,7 @@ function pageSyntheseAesh() {
         const dp = dispositifDe(x.e); const dossier = x.e.statut !== 'Notifié' ? ` <span class="pill warn" title="${esc(x.e.statut)}">dossier en cours</span>` : '';
         return `<tr><td><b>${esc(x.e.nom)}</b> ${esc(x.e.prenom)}${dossier}</td><td>${esc(x.e.classe)}</td><td><span class="pill ${x.e.type === 'Individuel' ? 'indiv' : 'mutu'}">${x.e.type}</span>${dp ? ` <span class="pill neutral">${dp}</span>` : ''}</td><td class="num" ${dp ? 'title="Heures déjà comprises dans les heures collectives de l\'AESH"' : ''}>${dp ? '<span class="muted">' + hf(x.heures) + '</span>' : hf(x.heures)}</td><td class="small">${partners || '<span class="muted">—</span>'}</td><td style="text-align:center">${okmark}</td></tr>`;
       }).join('') || '<tr><td colspan="6" class="muted">Aucun élève suivi.</td></tr>'}
-      </tbody><tfoot><tr style="font-weight:600"><td colspan="3">Total (${affs.length} élève${affs.length > 1 ? 's' : ''})</td><td class="num">${hf(c.ind + c.mut)}</td><td colspan="2" class="small muted">${c.autres ? '+ ' + hf(c.autres) + ' collectives (ULIS / SEGPA) = ' + hf(c.tot) + ' effectuées' : '= heures effectuées'}</td></tr></tfoot></table>
+      </tbody><tfoot><tr style="font-weight:600"><td colspan="3">Total (${affs.length} élève${affs.length > 1 ? 's' : ''})</td><td class="num">${hf(c.ind + c.mut)}</td><td colspan="2" class="small muted">${c.autres || c.coordo ? (c.autres ? '+ ' + hf(c.autres) + ' collectives (ULIS / SEGPA) ' : '') + (c.coordo ? '+ ' + hf(c.coordo) + ' de coordination ' : '') + '= ' + hf(c.tot) + ' effectuées' : '= heures effectuées'}</td></tr></tfoot></table>
     </div>`;
   }).join('');
   $('#page').innerHTML = `<div class="print-title">Synthèse par AESH</div>${cards}`;
@@ -978,8 +1005,9 @@ window.declarerAbsence = (aid = '') => {
     commit('aesh', `${a.nom} : absence déclarée (${d.motif}) à partir du ${frDate(a.absenceDebut)}${a.absenceFin ? ' jusqu\'au ' + frDate(a.absenceFin) : ''}${avant}`); location.hash = '#/absences'; setTimeout(() => publierAuto(), 100);
   });
 };
-window.finAbsence = aid => {
-  const a = aesh(aid); if (!confirm(`Mettre fin à l'absence de ${a.nom} ? Retour au statut « Actif » et les remplacements en cours sont archivés.`)) return;
+window.finAbsence = async aid => {
+  if (!(await demander(`Mettre fin à l'absence de ${(aesh(aid) || {}).nom || '?'} ? Retour au statut « Actif » et les remplacements en cours sont archivés.`, { ok: "Mettre fin à l'absence" }))) return;
+  const a = aesh(aid); if (!a) return;
   const n = archiverRemplacements(aid); const ab = absenceOuverte(aid); if (ab) { ab.ouvert = false; ab.fin = aujourdhui(); }
   a.statut = 'Actif'; a.absenceDebut = null; a.absenceFin = null; commit('aesh', `${a.nom} : fin d'absence${n ? ' ; remplacements archivés : ' + n : ''}`); setTimeout(() => publierAuto(), 100);
 };
@@ -1138,7 +1166,7 @@ function majTitreEtBadge() {
 window.questionAjouter = () => { const t = ($('#q-texte').value || '').trim(); if (!t) return; S.questions.unshift({ id: uid('q'), texte: t, pour: ($('#q-pour').value || '').trim(), lien: '', creeLe: aujourdhui(), fait: false, reponse: '' }); commit('question', 'Question ajoutée : ' + t.slice(0, 60)); };
 window.questionBascule = (id, v) => { const q = S.questions.find(x => x.id === id); if (!q) return; q.fait = !!v; commit('question', (v ? 'Question posée : ' : 'Question remise à poser : ') + q.texte.slice(0, 50)); };
 window.questionReponse = (id, v) => { const q = S.questions.find(x => x.id === id); if (!q) return; q.reponse = v.trim(); commit('question', 'Réponse notée : ' + q.texte.slice(0, 50)); };
-window.questionSupprimer = id => { const q = S.questions.find(x => x.id === id); if (!q || !confirm('Supprimer cette question ?')) return; S.questions = S.questions.filter(x => x.id !== id); commit('question', 'Question supprimée : ' + q.texte.slice(0, 50)); };
+window.questionSupprimer = async id => { if (!(await demander('Supprimer cette question ?', { ok: 'Supprimer', danger: true }))) return; const q = S.questions.find(x => x.id === id); if (!q) return; S.questions = S.questions.filter(x => x.id !== id); commit('question', 'Question supprimée : ' + q.texte.slice(0, 50)); };
 function pageQuestions() {
   setTitle('Questions à poser');
   const a = S.questions.filter(q => !q.fait), f = S.questions.filter(q => q.fait);
@@ -1201,10 +1229,10 @@ window.evalProposer = id => {
     actionEval('/api/admin/demandes/decider', { id, decision: 'proposer', aeshIds: ids, prevenir: !!f.mail });
   });
 };
-window.evalElargir = id => { if (confirm('Élargir cette demande à toute l\'équipe ?')) actionEval('/api/admin/demandes/decider', { id, decision: 'elargir', prevenir: confirm('Prévenir par mail les autres AESH ?') }); };
-window.evalValider = (id, aid) => { const a = aesh(aid); if (confirm(`Valider ${a ? a.nom : 'cette AESH'} ? Elle et l'enseignant.e recevront un mail de validation (tu reçois une copie).`)) actionEval('/api/admin/demandes/decider', { id, decision: 'accepter', aeshId: aid }); };
-window.evalRefuser = id => { const m = prompt('Motif du refus (envoyé à l\'enseignant.e) :', ''); if (m !== null) actionEval('/api/admin/demandes/decider', { id, decision: 'refuser', message: m }); };
-window.evalAnnuler = id => { if (confirm('Annuler cette demande ?')) actionEval('/api/admin/demandes/annuler', { id }); };
+window.evalElargir = async id => { if (!(await demander('Élargir cette demande à toute l\'équipe ?', { ok: 'Élargir' }))) return; const prevenir = await demander('Prévenir par mail les autres AESH ?', { ok: 'Oui, prévenir', annuler: 'Non' }); actionEval('/api/admin/demandes/decider', { id, decision: 'elargir', prevenir }); };
+window.evalValider = async (id, aid) => { const a = aesh(aid); if (await demander(`Valider ${a ? a.nom : 'cette AESH'} ? Elle et l'enseignant.e recevront un mail de validation (tu reçois une copie).`, { ok: 'Valider' })) actionEval('/api/admin/demandes/decider', { id, decision: 'accepter', aeshId: aid }); };
+window.evalRefuser = async id => { const m = await saisir('Motif du refus (envoyé à l\'enseignant.e) :', '', { ok: 'Refuser la demande' }); if (m !== null) actionEval('/api/admin/demandes/decider', { id, decision: 'refuser', message: m }); };
+window.evalAnnuler = async id => { if (await demander('Annuler cette demande ?', { ok: 'Annuler la demande', annuler: 'Garder', danger: true })) actionEval('/api/admin/demandes/annuler', { id }); };
 // Modifier ou supprimer une demande (aussi celles reçues en ligne) — demandé par Hanan le 13/11
 const TYPES_EVAL = ['Devoir surveillé', 'Évaluation', 'Examen blanc', 'Sortie', 'Autre'];
 const evalQui = d => d.statut === 'acceptee' && d.aeshId && !d.desiste ? 'l\'AESH validée et l\'enseignant.e' : 'l\'enseignant.e';
@@ -1231,10 +1259,10 @@ window.evalModifier = id => {
     else { Object.assign(d, champs); commit('aesh', 'Demande d\'accompagnement modifiée'); }
   }, () => setTimeout(() => evalSupprimer(id), 0));
 };
-window.evalSupprimer = id => {
+window.evalSupprimer = async id => {
   const d = demandeEval(id); if (!d) return;
-  if (!confirm(`Supprimer définitivement cette demande ?\n\n${libDemande(d)}${d.profNom ? ' · ' + d.profNom : ''}\n\nElle disparaît du cockpit et des liens des AESH. On ne peut pas revenir en arrière.`)) return;
-  const prevenir = (d.statut === 'proposee' || d.statut === 'acceptee') && d.date >= aujourdhui() && confirm(`Prévenir ${evalQui(d)} par mail que l'accompagnement est annulé ?\n\nOK = ouvrir un mail prêt à envoyer · Annuler = supprimer sans mail`);
+  if (!(await demander(`Supprimer définitivement cette demande ?\n\n${libDemande(d)}${d.profNom ? ' · ' + d.profNom : ''}\n\nElle disparaît du cockpit et des liens des AESH. On ne peut pas revenir en arrière.`, { ok: 'Supprimer', danger: true }))) return;
+  const prevenir = (d.statut === 'proposee' || d.statut === 'acceptee') && d.date >= aujourdhui() && await demander(`Prévenir ${evalQui(d)} par mail que l'accompagnement est annulé ?`, { ok: 'Oui, ouvrir un mail prêt à envoyer', annuler: 'Non, supprimer sans mail' });
   S.evalsVues = (S.evalsVues || []).filter(x => x !== id);
   if (serveurOK()) actionEval('/api/admin/demandes/supprimer', { id, prevenir, aeshAussi: d.statut === 'acceptee' && !d.desiste });
   else { S.evals.demandes = (S.evals.demandes || []).filter(x => x.id !== id); commit('aesh', 'Demande d\'accompagnement supprimée'); }
@@ -1358,7 +1386,43 @@ const view = { planning: 'classe', planningSite: '', elevesFilter: {}, sort: 'cl
 window.toggleMenu = v => document.body.classList.toggle('menu-open', typeof v === 'boolean' ? v : !document.body.classList.contains('menu-open'));
 window.addEventListener('hashchange', () => { try { localStorage.setItem('cockpit-derniere-page', JSON.stringify({ h: location.hash, t: Date.now() })); } catch (e) { } });
 let premierRendu = true;
+// Ordre des lignes figé tant qu'on reste sur la même page (une ligne ne change plus de place quand on modifie ses heures).
+// L'ordre normal revient quand on rouvre la page.
+let ORDRES = {}, dernierHash = null;
+function ordreFige(cle, items, idDe) {
+  const k = (location.hash || '#/synthese') + '|' + cle, prec = ORDRES[k], ids = items.map(idDe);
+  if (prec) { const rang = new Map(prec.map((id, i) => [id, i])); const res = items.map((x, i) => [x, rang.has(ids[i]) ? rang.get(ids[i]) : 1e6 + i]).sort((a, b) => a[1] - b[1]).map(a => a[0]); ORDRES[k] = res.map(idDe); return res; }
+  ORDRES[k] = ids; return items;
+}
+const signatureChamp = x => [x.tagName, 'name', 'id', 'onchange', 'oninput', 'onblur', 'placeholder', 'data-af', 'type'].map(k => k === x.tagName ? k : (x.getAttribute(k) || '')).join('§');
+function noterPage() {
+  const page = $('#page'), main = document.querySelector('.main'), a = document.activeElement;
+  const st = { y: window.scrollY, x: window.scrollX, p: page ? page.scrollTop : 0, m: main ? main.scrollTop : 0, tw: [...document.querySelectorAll('#page .table-wrap')].map(t => [t.scrollTop, t.scrollLeft]) };
+  if (a && page && page.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) {
+    const sig = signatureChamp(a), L = [...page.querySelectorAll(a.tagName)].filter(x => signatureChamp(x) === sig);
+    let sel = null; try { sel = [a.selectionStart, a.selectionEnd]; } catch (e) { }
+    st.f = { sig, i: L.indexOf(a), tag: a.tagName, val: a.value, modifie: a.tagName !== 'SELECT' && a.type !== 'checkbox' && a.value !== a.defaultValue, sel, modif: a.dataset.modif };
+  }
+  return st;
+}
+function remettrePage(st) {
+  const page = $('#page'), main = document.querySelector('.main');
+  if (page) page.scrollTop = st.p; if (main) main.scrollTop = st.m; window.scrollTo(st.x, st.y);
+  document.querySelectorAll('#page .table-wrap').forEach((t, i) => { if (st.tw[i]) { t.scrollTop = st.tw[i][0]; t.scrollLeft = st.tw[i][1]; } });
+  if (!st.f || !page) return;
+  const L = [...page.querySelectorAll(st.f.tag)].filter(x => signatureChamp(x) === st.f.sig), el = L[st.f.i] || (L.length === 1 ? L[0] : null);
+  if (!el) return;
+  if (st.f.modifie) el.value = st.f.val; if (st.f.modif) el.dataset.modif = st.f.modif;
+  try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
+  if (st.f.sel && st.f.sel[0] != null) { try { el.setSelectionRange(st.f.sel[0], st.f.sel[1]); } catch (e) { } }
+}
 function render() {
+  const memeHash = dernierHash === (location.hash || '#/synthese') && !premierRendu;
+  const st = memeHash ? noterPage() : null;
+  if (!memeHash) ORDRES = {};
+  try { rendre(); } finally { dernierHash = location.hash || '#/synthese'; if (st) remettrePage(st); }
+}
+function rendre() {
   if (premierRendu) { premierRendu = false; if (!location.hash) { try { const d = JSON.parse(localStorage.getItem('cockpit-derniere-page') || 'null'); if (d && d.h && /^#\/[a-z]/.test(d.h) && Date.now() - d.t < 12 * 3600 * 1000) history.replaceState(null, '', d.h); } catch (e) { } } }
   const hash = location.hash || '#/synthese';
   const [, name, id] = hash.split('/');
@@ -1385,7 +1449,7 @@ function pageSynthese() {
   const al = alertes();
   const kpi = (v, l, k = '', href = '') => href ? `<a href="${href}" class="kpi ${k}" style="text-decoration:none;color:inherit;cursor:pointer"><div class="v">${v}</div><div class="l">${l}</div></a>` : `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
   const classes = S.classes.slice().sort(cmpClasse).map(c => { const s = stats(elevesDe(c)); return { l: c.nom, h: '#/classes', segs: [{ v: s.couv, c: 'var(--ok)', t: 'couvert' }, { v: Math.max(0, s.reste), c: 'var(--bad)', t: 'reste' }, { v: s.prev, c: 'var(--warn)', t: 'prévisionnel' }], right: `${s.n} élève${s.n > 1 ? 's' : ''}` }; }).filter(x => x.right !== '0 élèves');
-  const aeshRows = sortAesh(S.aesh).map(a => { const c = charge(a); return { l: a.nom, h: '#/aesh/' + a.id, max: a.quotite || 0, segs: [{ v: c.ind, c: 'var(--indiv)', t: 'individuel' }, { v: c.mut, c: 'var(--mutu)', t: 'mutualisé' }], right: a.quotite == null ? '? h' : `${hf(c.tot)} / ${a.quotite}` }; });
+  const aeshRows = sortAesh(S.aesh).map(a => { const c = charge(a); return { l: a.nom, h: '#/aesh/' + a.id, max: a.quotite || 0, segs: [{ v: c.ind, c: 'var(--indiv)', t: 'individuel' }, { v: c.mut, c: 'var(--mutu)', t: 'mutualisé' }, ...(c.autres ? [{ v: c.autres, c: '#8A93A6', t: 'collectif' }] : []), ...(c.coordo ? [{ v: c.coordo, c: COULEUR_COORDO, t: 'coordo' }] : [])], right: a.quotite == null ? '? h' : `${hf(c.tot)} / ${a.quotite}` }; });
   const aeshResteRows = sortAesh(S.aesh).filter(a => a.quotite != null && !absente(a) && charge(a).reste > 0).sort((p, q) => charge(q).reste - charge(p).reste).map(a => { const c = charge(a); return { l: a.nom, h: '#/aesh/' + a.id, max: a.quotite, segs: [{ v: c.reste, c: 'var(--ok)', t: 'reste à combler' }], right: `${hf(c.reste)} à combler` }; });
   const bySite = SITES.map(s => { const st = stats(S.eleves.filter(e => e.site === s)), rs = ressource(s); return `<tr><td>${s}</td><td class="num">${st.n}</td><td class="num">${st.ind}</td><td class="num">${st.mut}</td><td class="num">${st.pending}</td><td class="num">${hf(st.cible)}</td><td class="num">${hf(st.couv)}</td><td class="num ${st.reste > 0 ? 'bad' : ''}">${hf(st.reste)}</td><td class="num">${rs.n}</td><td class="num">${hf(rs.vol)}</td><td class="num" style="color:${rs.reste < 0 ? 'var(--bad)' : 'var(--ok)'}">${hf(rs.reste)}</td></tr>`; }).join('');
   $('#page').innerHTML = `<div class="print-title">Synthèse PAS — ${esc(S.annee)}</div>
@@ -1398,7 +1462,7 @@ function pageSynthese() {
   </div>
   <div class="grid g4" style="margin-bottom:14px">
     ${(() => { const L = S.aesh.filter(a => !absente(a) && a.quotite != null), C = L.map(a => charge(a)), som = f => C.reduce((t, c) => t + f(c), 0), vol = L.reduce((t, a) => t + a.quotite, 0);
-      return `<div class="card"><h2>Volume horaire disponible AESH <span class="small muted">quotités de ${L.length} AESH${S.aesh.some(absente) ? ' (absentes exclues)' : ''}</span></h2>${donut([{ l: 'Individuel', v: som(c => c.ind), c: 'var(--indiv)' }, { l: 'Mutualisé', v: som(c => c.mut), c: 'var(--mutu)' }, ...(som(c => c.autres) ? [{ l: 'Collectif (ULIS / SEGPA)', v: som(c => c.autres), c: '#8A93A6' }] : []), { l: 'Encore disponible', v: som(c => Math.max(0, c.reste || 0)), c: '#E3E7ED' }], 150, hf(vol))}<p class="small muted" style="margin:6px 0 0">Au centre : total des quotités (${hf(vol)}). Heures utilisées : ${hf(som(c => c.tot))}.</p></div>`; })()}
+      return `<div class="card"><h2>Volume horaire disponible AESH <span class="small muted">quotités de ${L.length} AESH${S.aesh.some(absente) ? ' (absentes exclues)' : ''}</span></h2>${donut([{ l: 'Individuel', v: som(c => c.ind), c: 'var(--indiv)' }, { l: 'Mutualisé', v: som(c => c.mut), c: 'var(--mutu)' }, ...(som(c => c.autres) ? [{ l: 'Collectif (ULIS / SEGPA)', v: som(c => c.autres), c: '#8A93A6' }] : []), ...(som(c => c.coordo) ? [{ l: 'Coordo', v: som(c => c.coordo), c: COULEUR_COORDO }] : []), { l: 'Encore disponible', v: som(c => Math.max(0, c.reste || 0)), c: '#E3E7ED' }], 150, hf(vol))}<p class="small muted" style="margin:6px 0 0">Au centre : total des quotités (${hf(vol)}). Heures utilisées : ${hf(som(c => c.tot))}.</p></div>`; })()}
     <div class="card"><h2>Heures par type d'accompagnement <span class="small muted">hors élèves SEGPA et ULIS · clic sur un segment pour voir les élèves</span></h2>${donut([{ l: 'Individuel', v: S.eleves.filter(e => isActive(e) && e.type === 'Individuel' && !['SEGPA', 'ULIS'].includes(dispositifDe(e))).reduce((s, e) => s + (e.heures || 0), 0), c: 'var(--indiv)', href: "javascript:gotoElevesType('Individuel')" }, { l: 'Mutualisé', v: S.eleves.filter(e => isActive(e) && e.type === 'Mutualisé' && !['SEGPA', 'ULIS'].includes(dispositifDe(e))).reduce((s, e) => s + (e.heures || 0), 0), c: 'var(--mutu)', href: "javascript:gotoElevesType('Mutualisé')" }, { l: 'Prévisionnel (dossiers)', v: g.prev, c: 'var(--warn)', href: "javascript:gotoElevesStatut(['Dossier renouvellement déposé AESHi','Dossier renouvellement déposé AESHm'])" }])}</div>
     <div class="card"><h2>Couverture des élèves <span class="small muted">clic sur un segment pour voir les élèves</span></h2>${donut([{ l: 'Couverts', v: g.n - g.nonCouv - g.partiel - g.adef, c: 'var(--ok)', href: "javascript:gotoElevesCouv(['Couvert','Sur-couvert','Suivi (sans cible)'])" }, { l: 'Partiels', v: g.partiel, c: 'var(--warn)', href: "javascript:gotoElevesCouv('Partiel')" }, { l: 'Non couverts', v: g.nonCouv, c: 'var(--bad)', href: "javascript:gotoElevesCouv('Non couvert')" }, { l: 'Sans cible définie', v: g.adef, c: '#B8C2CE', href: "javascript:gotoElevesCouv('À définir')" }])}</div>
     <div class="card"><h2>Alertes <span class="pill ${al.length ? 'bad' : 'ok'}">${al.length}</span> <a href="#/alertes" class="small" style="font-weight:400">Voir tout →</a></h2><ul class="alerts" style="list-style:none;padding:0;margin:0;max-height:170px;overflow:auto">${al.length ? al.slice(0, 30).map(a => `<li><span class="dot" style="background:var(--${a.k === 'warn' ? 'warn' : 'bad'})"></span><a href="${a.h}" style="text-decoration:none;color:var(--${a.k === 'warn' ? 'warn' : 'bad'})">${esc(a.t)}</a></li>`).join('') : '<li class="muted">Aucune alerte.</li>'}</ul></div>
@@ -1459,8 +1523,8 @@ window.triValidite = () => { view.sort = view.sort === 'validite' ? 'validite-in
 function conflit(aeshId, eleveId, jour, d, f, ignoreId, groupe) {
   return S.creneaux.some(c => c.id !== ignoreId && c.jour === jour && (c.aeshId === aeshId || c.eleveId === eleveId) && t2m(c.debut) < f && t2m(c.fin) > d && semainesSeRecoupent(c, { groupe }));
 }
-window.proposerCreneaux = () => {
-  if (!confirm('Générer des créneaux pour les affectations qui n\'en ont pas encore ? (les créneaux existants sont conservés)')) return;
+window.proposerCreneaux = async () => {
+  if (!(await demander('Générer des créneaux pour les affectations qui n\'en ont pas encore ? (les créneaux existants sont conservés)', { ok: 'Générer' }))) return;
   let n = 0;
   const affs = S.affectations.filter(a => a.heures > 0 && eleve(a.eleveId) && isActive(eleve(a.eleveId)) && aesh(a.aeshId));
   affs.sort((a, b) => b.heures - a.heures);
@@ -1493,7 +1557,7 @@ window.editCreneau = (id, presets = {}) => {
       if (!d.eleveId || !d.aeshId) { alert('Choisis un élève et une AESH.'); return false; }
       if (!d.debut || !d.fin) { alert('Indique l\'heure de début et l\'heure de fin.'); return false; }
       if (fin <= deb) { alert('L\'heure de fin doit être après le début.'); return false; }
-      if (conflit(d.aeshId, d.eleveId, jour, deb, fin, id, d.groupe) && !confirm('Conflit : l\'AESH ou l\'élève a déjà un créneau à ce moment. Enregistrer quand même ?')) return false;
+      if (conflit(d.aeshId, d.eleveId, jour, deb, fin, id, d.groupe) && !($('#mform') && $('#mform').dataset.forcer)) { demander('Conflit : l\'AESH ou l\'élève a déjà un créneau à ce moment. Enregistrer quand même ?', { ok: 'Enregistrer quand même' }).then(oui => { const fm = $('#mform'); if (oui && fm) { fm.dataset.forcer = '1'; $('#m-ok').click(); } }); return false; }
       if (id) { Object.assign(c, { eleveId: d.eleveId, aeshId: d.aeshId, jour, debut: d.debut, fin: d.fin }); if (d.groupe) c.groupe = d.groupe; else delete c.groupe; } else S.creneaux.push({ id: uid('k'), eleveId: d.eleveId, aeshId: d.aeshId, jour, debut: d.debut, fin: d.fin, ...(d.groupe ? { groupe: d.groupe } : {}) });
       commit('planning', `Créneau ${id ? 'modifié' : 'ajouté'} : ${eleve(d.eleveId).nom} · ${aesh(d.aeshId).nom} · ${JOURS[jour - 1]} ${d.debut}-${d.fin}`);
     }, id ? () => { S.creneaux = S.creneaux.filter(x => x.id !== id); commit('planning', 'Créneau supprimé'); } : null);
@@ -1523,7 +1587,7 @@ window.editClasse = id => {
     d => { if (!d.nom.trim()) { alert('Nom obligatoire'); return false; } const old = c.nom; Object.assign(c, { nom: d.nom.trim(), site: d.site, niveau: d.niveau, effectif: num(d.effectif), pp: d.pp });
       if (!id) S.classes.push({ id: uid('c'), ...c }); else if (old !== c.nom) S.eleves.forEach(e => { if (e.classe === old) e.classe = c.nom; });
       commit('classe', `Classe ${id ? 'modifiée' : 'créée'} : ${c.nom}`); },
-    id ? () => { if (elevesDe(c).length && !confirm('Des élèves sont rattachés à cette classe. Supprimer quand même ?')) return; S.classes = S.classes.filter(x => x.id !== id); commit('classe', `Classe supprimée : ${c.nom}`); } : null);
+    id ? async () => { if (elevesDe(c).length && !(await demander('Des élèves sont rattachés à cette classe. Supprimer quand même ?', { ok: 'Supprimer', danger: true }))) return; S.classes = S.classes.filter(x => x.id !== id); commit('classe', `Classe supprimée : ${c.nom}`); } : null);
 };
 
 /* ====================== ÉLÈVES ====================== */
@@ -1695,12 +1759,12 @@ window.inlineEditAesh = (id, field, kind) => {
   c.onblur = () => done(false);
   c.onkeydown = ev => { if (ev.key === 'Escape') { c.onblur = null; done(true); } if (ev.key === 'Enter') c.blur(); };
 };
-window.changerAesh = (eid, oldAid, newAid) => {
+window.changerAesh = async (eid, oldAid, newAid) => {
   if (!newAid || newAid === oldAid) return;
   const e = eleve(eid); const old = S.affectations.find(z => z.eleveId === eid && z.aeshId === oldAid);
   const heures = old ? old.heures : 0;
   const existing = S.affectations.find(z => z.eleveId === eid && z.aeshId === newAid);
-  if (existing && existing.heures > 0 && !confirm(`${aesh(newAid).nom} a déjà ${hf(existing.heures)} pour ${e.nom} ${e.prenom}. Remplacer par ${hf(heures)} ?`)) { render(); return; }
+  if (existing && existing.heures > 0 && !(await demander(`${aesh(newAid).nom} a déjà ${hf(existing.heures)} pour ${e.nom} ${e.prenom}. Remplacer par ${hf(heures)} ?`, { ok: 'Remplacer' }))) { render(); return; }
   S.affectations = S.affectations.filter(z => !(z.eleveId === eid && z.aeshId === oldAid) && !(z.eleveId === eid && z.aeshId === newAid));
   S.affectations.push({ eleveId: eid, aeshId: newAid, heures, aConfirmer: false });
   commit('affectation', `${e.nom} ${e.prenom} : ${aesh(oldAid).nom} → ${aesh(newAid).nom} (${hf(heures)})`);
@@ -1734,8 +1798,8 @@ function pageAesh() {
      <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="margin:0">${esc(a.nom)}</h2><span class="pill ${c.k}">${c.l}</span>${a.statut && a.statut !== 'Actif' ? ` <span class="pill warn">${esc(a.statut)}</span>` : ''}</div>
      <div class="muted small">${a.site}${a.remarques ? ' · ' + esc(a.remarques) : ''}</div>
      <div style="display:flex;gap:16px;margin:10px 0 6px"><div><div style="font-size:22px;font-weight:700">${a.quotite == null ? '<span style="color:var(--warn)">?</span>' : a.quotite + ' h'}</div><div class="small muted">quotité</div></div><div><div style="font-size:22px;font-weight:700">${hf(c.tot)}</div><div class="small muted">affectées</div></div><div><div style="font-size:22px;font-weight:700;color:${c.reste == null ? 'inherit' : 'var(--' + c.k + ')'}">${c.reste == null ? '?' : hf(c.reste)}</div><div class="small muted">reste</div></div><div><div style="font-size:22px;font-weight:700">${c.n}</div><div class="small muted">élèves</div></div></div>
-     <div class="gauge" style="height:10px"><i class="indiv" style="width:${a.quotite ? Math.min(100, pct(c.ind, a.quotite)) : 0}%;float:left;border-radius:4px 0 0 4px"></i><i style="width:${a.quotite ? Math.min(100 - pct(c.ind, a.quotite), pct(c.mut, a.quotite)) : 0}%;float:left;border-radius:0;background:var(--mutu)"></i>${c.autres ? `<i style="width:${a.quotite ? Math.min(100 - pct(c.ind, a.quotite) - pct(c.mut, a.quotite), pct(c.autres, a.quotite)) : 0}%;float:left;border-radius:0;background:${couleurAesh(a)}"></i>` : ''}</div>
-     <div class="small muted" style="margin-top:4px"><span style="white-space:nowrap"><span class="dot" style="background:var(--indiv)"></span>individuel ${hf(c.ind)}</span> <span style="white-space:nowrap"><span class="dot" style="background:var(--mutu);margin-left:8px"></span>mutualisé ${hf(c.mut)}</span>${c.autres ? ` <span style="white-space:nowrap"><span class="dot" style="background:${a.couleur};margin-left:8px"></span>collectif ${hf(c.autres)}</span>` : ''}</div>
+     <div class="gauge" style="height:10px"><i class="indiv" style="width:${a.quotite ? Math.min(100, pct(c.ind, a.quotite)) : 0}%;float:left;border-radius:4px 0 0 4px"></i><i style="width:${a.quotite ? Math.min(100 - pct(c.ind, a.quotite), pct(c.mut, a.quotite)) : 0}%;float:left;border-radius:0;background:var(--mutu)"></i>${c.autres ? `<i style="width:${a.quotite ? Math.min(100 - pct(c.ind, a.quotite) - pct(c.mut, a.quotite), pct(c.autres, a.quotite)) : 0}%;float:left;border-radius:0;background:${couleurAesh(a)}"></i>` : ''}${c.coordo ? `<i style="width:${a.quotite ? Math.max(0, Math.min(100 - pct(c.ind, a.quotite) - pct(c.mut, a.quotite) - pct(c.autres, a.quotite), pct(c.coordo, a.quotite))) : 0}%;float:left;border-radius:0;background:${COULEUR_COORDO}"></i>` : ''}</div>
+     <div class="small muted" style="margin-top:4px"><span style="white-space:nowrap"><span class="dot" style="background:var(--indiv)"></span>individuel ${hf(c.ind)}</span> <span style="white-space:nowrap"><span class="dot" style="background:var(--mutu);margin-left:8px"></span>mutualisé ${hf(c.mut)}</span>${c.autres ? ` <span style="white-space:nowrap"><span class="dot" style="background:${a.couleur};margin-left:8px"></span>collectif ${hf(c.autres)}</span>` : ''}${c.coordo ? ` <span style="white-space:nowrap"><span class="dot" style="background:${COULEUR_COORDO};margin-left:8px"></span>coordo ${hf(c.coordo)}</span>` : ''}</div>
      ${(() => { const L = affOfAesh(a).map(x => ({ e: eleve(x.eleveId), h: x.heures || 0, conf: x.aConfirmer })).filter(x => x.e).sort((p, q) => (p.e.type === q.e.type ? 0 : p.e.type === 'Individuel' ? -1 : 1) || p.e.classe.localeCompare(q.e.classe, 'fr') || p.e.nom.localeCompare(q.e.nom, 'fr'));
        return L.length ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)"><div class="small muted" style="margin-bottom:4px">${L.length} élève${L.length > 1 ? 's' : ''} suivi${L.length > 1 ? 's' : ''}</div><div style="display:flex;flex-wrap:wrap;gap:4px">${L.map(x => `<a href="#/eleves/${x.e.id}" onclick="event.stopPropagation()" style="text-decoration:none;color:inherit;font-size:12px;line-height:1.25;border:1px solid var(--line);border-left:3px solid var(${x.e.type === 'Individuel' ? '--indiv' : '--mutu'});border-radius:6px;padding:2px 6px;background:var(--surface)" title="${esc(x.e.nom + ' ' + x.e.prenom + ' · ' + x.e.classe + ' · ' + hf(x.h))}"><b>${esc(x.e.nom)}</b> ${esc(x.e.prenom)} <span class="muted">${esc(x.e.classe)}${libDisp(x.e) ? ' ' + libDisp(x.e) : ''} · ${hf(x.h)}${x.conf ? ' ?' : ''}</span></a>`).join('')}</div></div>` : ''; })()}
     </div>`; }).join('')}</div>`;
@@ -1769,6 +1833,7 @@ window.editAesh = id => {
     </div>
     <label class="f wide" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="longueDuree" ${a.longueDuree ? 'checked' : ''} style="width:auto"> Arrêt de longue durée : ne pas compter sa quotité dans la synthèse annuelle</label>
     <label class="f">Heures collectives (h) <span class="small muted">hors élève individuel — ex. ULIS, SEGPA</span>${champH('name="heuresAutres"', a.heuresAutres)}</label>
+    <label class="f">Heures de coordination (h) <span class="small muted">travaillées en coordo : comptées dans ses heures, plus « disponibles »</span>${champH('name="heuresCoordo"', a.heuresCoordo)}</label>
     <label class="f">Dispositif <span class="small muted">seules les AESH ULIS suivent les élèves ULIS du collège, seules les AESH SEGPA les élèves SEGPA</span><select name="dispositif"><option value="">Aucun (élèves en ordinaire)</option>${DISPOSITIFS.map(x => `<option ${a.dispositif === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
     <label class="f">E-mail<input type="email" name="email" value="${esc(a.email)}"></label>
     <label class="f">Couleur<input type="color" name="couleur" value="${a.couleur}" style="height:36px;width:100%"></label>
@@ -1778,11 +1843,11 @@ window.editAesh = id => {
       <select id="attach-eleve-select" style="width:auto">${dispo.length ? dispo.map(e => `<option value="${e.id}">${esc(e.nom)} ${esc(e.prenom)} — ${esc(e.classe)}</option>`).join('') : '<option value="">Aucun élève disponible</option>'}</select>
       <span style="width:170px;display:inline-block">${champH('id="attach-eleve-heures" placeholder="heures / semaine"', null)}</span>
       <button type="button" class="btn sm" onclick="attacherEleve('${id}')">+ Rattacher</button></div>`; })() : ''}`,
-    d => { if (!d.nom.trim()) { alert('Nom obligatoire'); return false; } if (Number.isNaN(num(d.quotite)) || Number.isNaN(num(d.heuresAutres))) { alert(H_ILLISIBLE); return false; } const nomParts = d.nom.trim().split(' '); const nomFmt = nomParts.length > 1 ? nomParts[0] + ' ' + nomParts.slice(1).join(' ').toUpperCase() : nomParts[0];
-      const obj = { nom: nomFmt, site: d.site, quotite: num(d.quotite), statut: d.statut, absenceDebut: d.statut !== 'Actif' ? (d.absenceDebut || null) : null, absenceFin: d.statut !== 'Actif' ? (d.absenceFin || null) : null, heuresAutres: num(d.heuresAutres), longueDuree: !!d.longueDuree, dispositif: d.dispositif || '', email: d.email.trim(), couleur: d.couleur, remarques: d.remarques };
+    d => { if (!d.nom.trim()) { alert('Nom obligatoire'); return false; } if (Number.isNaN(num(d.quotite)) || Number.isNaN(num(d.heuresAutres)) || Number.isNaN(num(d.heuresCoordo))) { alert(H_ILLISIBLE); return false; } const nomParts = d.nom.trim().split(' '); const nomFmt = nomParts.length > 1 ? nomParts[0] + ' ' + nomParts.slice(1).join(' ').toUpperCase() : nomParts[0];
+      const obj = { nom: nomFmt, site: d.site, quotite: num(d.quotite), statut: d.statut, absenceDebut: d.statut !== 'Actif' ? (d.absenceDebut || null) : null, absenceFin: d.statut !== 'Actif' ? (d.absenceFin || null) : null, heuresAutres: num(d.heuresAutres), heuresCoordo: num(d.heuresCoordo), longueDuree: !!d.longueDuree, dispositif: d.dispositif || '', email: d.email.trim(), couleur: d.couleur, remarques: d.remarques };
       if (id) { const chg = a.quotite !== obj.quotite ? ` (quotité ${a.quotite ?? '—'} → ${obj.quotite ?? '—'})` : ''; const dchg = a.dispositif !== obj.dispositif ? ` (dispositif ${a.dispositif || 'aucun'} → ${obj.dispositif || 'aucun'})` : ''; const avantAbs = !!absenceOuverte(a.id); Object.assign(a, obj); syncAbsence(a); if (avantAbs !== !!absenceOuverte(a.id)) setTimeout(() => publierAuto(), 300); const nb = synchroDispositifs(); commit('aesh', `${a.nom} modifié${chg}${dchg}${nb ? ' — élèves ULIS / SEGPA rattachés automatiquement' : ''}`); }
       else { const n = { id: uid('a'), ...obj }; S.aesh.push(n); const nb = synchroDispositifs(); commit('aesh', `AESH ajouté : ${n.nom}${nb ? ' — élèves ULIS / SEGPA rattachés automatiquement' : ''}`); location.hash = '#/aesh/' + n.id; } },
-    id ? () => { if (!confirm(`Supprimer ${a.nom} et toutes ses affectations ?`)) return; S.creneaux = S.creneaux.filter(x => x.aeshId !== id); S.aesh = S.aesh.filter(x => x.id !== id); synchroDispositifs(); S.affectations = S.affectations.filter(x => x.aeshId !== id); commit('aesh', `AESH supprimé : ${a.nom}`); location.hash = '#/aesh'; } : null);
+    id ? async () => { if (!(await demander(`Supprimer ${a.nom} et toutes ses affectations ?`, { ok: 'Supprimer', danger: true }))) return; S.creneaux = S.creneaux.filter(x => x.aeshId !== id); S.aesh = S.aesh.filter(x => x.id !== id); synchroDispositifs(); S.affectations = S.affectations.filter(x => x.aeshId !== id); commit('aesh', `AESH supprimé : ${a.nom}`); location.hash = '#/aesh'; } : null);
 };
 function remplacementCard(a) {
   const mesCreneaux = creneauxACouvrir(a.id); // seulement les créneaux touchés par l'absence (jours de la période), pas toute la semaine
@@ -1824,8 +1889,8 @@ function archiverRemplacements(aeshId) {
   S.creneaux.forEach(cr => { if (cr.aeshId === aeshId) { delete cr.remplacantId; delete cr.remplacantDepuis; } });
   return concernes.length;
 }
-window.terminerRemplacement = aeshId => {
-  if (!confirm('Retirer tous les remplacements en cours pour cet AESH ?')) return;
+window.terminerRemplacement = async aeshId => {
+  if (!(await demander('Retirer tous les remplacements en cours pour cet AESH ?', { ok: 'Retirer' }))) return;
   const a = aesh(aeshId);
   const n = archiverRemplacements(aeshId);
   commit('aesh', `Remplacements terminés pour ${a.nom}${n ? ' (archivés : ' + n + ' créneau' + (n > 1 ? 'x' : '') + ')' : ''}`);
@@ -1855,7 +1920,7 @@ function remplacementsEnCoursCard(a) {
 }
 function ficheAesh(id) {
   const a = aesh(id); if (!a) { location.hash = '#/aesh'; return; }
-  const c = charge(a); const affs = affOfAesh(a).map(x => ({ ...x, e: eleve(x.eleveId) })).sort((p, q) => q.heures - p.heures);
+  const c = charge(a); const affs = ordreFige('aesh-eleves', affOfAesh(a).map(x => ({ ...x, e: eleve(x.eleveId) })).sort((p, q) => (q.heures || 0) - (p.heures || 0) || String(p.e.nom).localeCompare(String(q.e.nom), 'fr') || String(p.e.prenom).localeCompare(String(q.e.prenom), 'fr')), x => x.eleveId);
   const bl = S.creneaux.filter(x => x.aeshId === id).map(x => crBlock(x, 'aesh')).filter(Boolean);
   const planned = dureeUnique(bl);
   const conflits = chevauchements().filter(x => x.type === 'aesh' && x.id === id);
@@ -1865,11 +1930,12 @@ function ficheAesh(id) {
   const byClass = {}; affs.forEach(x => { byClass[x.e.classe] = (byClass[x.e.classe] || 0) + x.heures; });
   $('#page').innerHTML = `<div class="print-title">Fiche AESH — ${esc(a.nom)}</div>
   <div class="fiche-head" style="${absente(a) ? 'background:#EEF0F2;border-radius:var(--radius)' : ''}"><div class="avatar" style="background:${couleurAesh(a)}">${ini(a)}</div><div><div style="font-size:18px;font-weight:650">${esc(a.nom)} <span class="pill ${c.k}">${c.l}</span>${a.statut && a.statut !== 'Actif' ? ` <span class="pill warn">${esc(a.statut)}</span>` : ''}</div><div class="muted">${a.site}${a.dispositif ? ' · <b>dispositif ' + a.dispositif + '</b>' : ''}${a.remarques ? ' · ' + esc(a.remarques) : ''}${a.email ? ' · <a href="mailto:' + esc(a.email) + '" style="color:inherit">' + esc(a.email) + '</a>' : ''}</div></div></div>
-  <div class="kpis" style="grid-template-columns:repeat(${c.autres ? 6 : 5},1fr)">
+  <div class="kpis" style="grid-template-columns:repeat(${5 + (c.autres ? 1 : 0) + (c.coordo ? 1 : 0)},1fr)">
    <div class="kpi ${a.quotite == null ? 'warn' : ''}"><div class="v" data-af="quotite" title="Cliquer pour modifier" style="cursor:pointer" onclick="inlineEditAesh('${id}','quotite','number')">${a.quotite == null ? '<span class="muted">— cliquer pour saisir</span>' : a.quotite + ' h'}</div><div class="l">quotité hebdo</div></div>
    <div class="kpi indiv"><div class="v">${hf(c.ind)}</div><div class="l">individuel</div></div>
    <div class="kpi mutu"><div class="v">${hf(c.mut)}</div><div class="l">mutualisé</div></div>
    ${c.autres ? `<div class="kpi"><div class="v">${hf(c.autres)}</div><div class="l">collectif (ULIS/autre)</div></div>` : ''}
+   ${c.coordo ? `<div class="kpi"><div class="v" style="color:${COULEUR_COORDO}">${hf(c.coordo)}</div><div class="l">coordo</div></div>` : ''}
    <div class="kpi ${c.reste == null ? '' : c.k}"><div class="v">${c.reste == null ? '?' : hf(c.reste)}</div><div class="l">reste disponible</div></div>
    <div class="kpi"><div class="v">${c.taux == null ? '—' : Math.round(c.taux * 100) + ' %'}</div><div class="l">taux d'occupation</div></div></div>
   ${conflits.length ? `<div class="card" style="border-left:4px solid var(--bad);background:var(--bad-soft);margin-bottom:14px">⚠ <b>${conflits.length} chevauchement${conflits.length > 1 ? 's' : ''} d'horaires</b> détecté${conflits.length > 1 ? 's' : ''} dans l'emploi du temps de ${esc(a.nom)} : ${conflits.map(x => `le ${JOURS[x.a.jour - 1]} (${x.a.debut}–${x.a.fin} et ${x.b.debut}–${x.b.fin})`).join(', ')}.</div>` : ''}
@@ -1928,7 +1994,7 @@ window.ajouterHS = (id, type) => {
     <label class="f wide">Note<input type="text" name="note" placeholder="${recup ? 'ex. matinée du mercredi récupérée' : 'ex. semaine sans heure en plus'}"></label></div>`,
     d => { const hrs = num(d.heures); if (hrs == null || Number.isNaN(hrs) || hrs === 0 || (recup && hrs < 0)) { alert('Indique un nombre d\'heures' + (recup ? ' positif' : ' (positif ou négatif)') + ', par exemple 1,5.'); return false; } a.hs = a.hs || { autorise: 0, depuis: '', mouvements: [] }; a.hs.mouvements.push({ id: uid('hs'), date: d.date, type, heures: hrs, note: (d.note || '').trim() }); commit('aesh', `${a.nom} : heures supplémentaires — ${recup ? 'récupération de ' : 'ajustement de '}${hrs} h`); });
 };
-window.supprimerHS = (id, mid) => { const a = aesh(id); if (!confirm('Supprimer ce mouvement du compteur ?')) return; a.hs.mouvements = a.hs.mouvements.filter(m => m.id !== mid); commit('aesh', `${a.nom} : mouvement d'heures supplémentaires supprimé`); };
+window.supprimerHS = async (id, mid) => { if (!(await demander('Supprimer ce mouvement du compteur ?', { ok: 'Supprimer', danger: true }))) return; const a = aesh(id); if (!a) return; a.hs.mouvements = a.hs.mouvements.filter(m => m.id !== mid); commit('aesh', `${a.nom} : mouvement d'heures supplémentaires supprimé`); };
 function carteSouhaits(a) {
   const so = souhaitsDe(a); const id = a.id;
   const aCren = new Set(S.creneaux.filter(x => x.aeshId === id).map(x => x.jour + '-' + PERIODES.findIndex(p => t2m(p) <= t2m(x.debut) && t2m(x.debut) < t2m(p) + 55)));
@@ -2009,8 +2075,9 @@ function pageDossiers() {
   <div class="doss-chips no-print">${resume}</div>${SECTIONS.map(bloc).join('')}`;
 }
 window.setStatut = (id, st) => { const e = eleve(id); const old = e.statut; e.statut = st; commit('dossier', `${e.nom} ${e.prenom} : ${old} → ${st}`); };
-window.notifier = id => { const e = eleve(id); const t = e.statut.includes('AESHi') ? 'Individuel' : e.statut.includes('AESHm') ? 'Mutualisé' : e.type;
-  const h = prompt(`${e.nom} ${e.prenom} — heures notifiées (${t}) :`, e.heuresPrev ?? e.heures ?? ''); if (h === null) return;
+window.notifier = async id => { let e = eleve(id); const t = e.statut.includes('AESHi') ? 'Individuel' : e.statut.includes('AESHm') ? 'Mutualisé' : e.type;
+  const h = await saisir(`${e.nom} ${e.prenom} — heures notifiées (${t}) :`, e.heuresPrev ?? e.heures ?? '', { ok: 'Enregistrer' }); if (h === null) return;
+  if (Number.isNaN(num(h))) { alert(H_ILLISIBLE); return; } e = eleve(id); if (!e) return;
   const old = e.statut; e.statut = 'Notifié'; e.type = t; e.heures = num(h); e.heuresPrev = null; commit('dossier', `${e.nom} ${e.prenom} notifié ${t} ${hf(e.heures)} (était : ${old})`); location.hash = '#/eleves/' + id; };
 
 /* ====================== ARCHIVES (remplacements) ====================== */
@@ -2045,9 +2112,9 @@ function carteDossiers() {
 function pageParametres() {
   setTitle('Données & exports'); setTimeout(() => { if (location.hash === '#/parametres') $('#page').insertAdjacentHTML('beforeend', carteDossiers()); }, 0);
   $('#page').innerHTML = `<div class="grid g2">
-   <div class="card"><h2>Établissement</h2><div class="form-grid"><label class="f">Nom<input type="text" id="p-etab" value="${esc(S.etablissement)}"></label><label class="f">Année scolaire<input type="text" id="p-annee" value="${esc(S.annee)}"></label></div><div class="toolbar" style="margin:10px 0 0"><button class="btn primary" onclick="S.etablissement=document.getElementById('p-etab').value;S.annee=document.getElementById('p-annee').value;commit('param','Paramètres modifiés');toast('Enregistré')">Enregistrer</button></div>
+   <div class="card"><h2>Établissement</h2><div class="form-grid"><label class="f">Nom<input type="text" id="p-etab" value="${esc(S.etablissement)}"></label><label class="f">Année scolaire<input type="text" id="p-annee" value="${esc(S.annee)}"></label></div><div class="toolbar" style="margin:10px 0 0"><button class="btn primary" onclick="enregistrerEtab()">Enregistrer</button></div>
     <h2 style="margin-top:18px">Sauvegarde JSON</h2><p class="small muted">Le JSON contient tout (élèves, AESH, affectations, créneaux, journal). C'est ta sauvegarde de référence : exporte-le après chaque séance de travail et garde-le dans un dossier sûr.</p>
-    <div class="toolbar"><button class="btn primary" onclick="exportJSON()">Exporter JSON</button><label class="btn">Importer JSON<input type="file" accept=".json" class="sr" onchange="importJSON(this.files[0])"></label></div>
+    <div class="toolbar"><button class="btn primary" onclick="exportJSON()">Exporter JSON</button><label class="btn">Importer JSON<input type="file" accept=".json" class="sr" onchange="importJSON(this.files[0]);this.value=''"></label></div>
     <h2 style="margin-top:18px">Mise à jour préparée</h2><p class="small muted">Fichier préparé par Claude (emplois du temps AESH lus sur les EDT papier, dates de notification…) : tu vérifies les correspondances et les changements avant qu'ils soient enregistrés.</p>
     <div class="toolbar"><label class="btn">Importer une mise à jour (EDT, fiches élèves, conseils de classe)<input type="file" accept=".json" class="sr" onchange="importEdtAesh(this.files[0]);this.value=''"></label><button class="btn" onclick="annulerEdtAesh()">Annuler la dernière mise à jour</button></div>
     <h2 style="margin-top:18px">Excel / CSV</h2><p class="small muted">Excel = 4 onglets (Élèves, AESH, Affectation, Créneaux). Nécessite une connexion la première fois (librairie chargée à la volée) ; sinon le CSV fonctionne hors ligne.</p>
@@ -2056,8 +2123,8 @@ function pageParametres() {
     <div class="toolbar"><button class="btn" onclick="exportWordListe()">Liste élèves</button><button class="btn" onclick="exportWordSynthese()">Synthèse</button></div>
     <h2 style="margin-top:18px">PDF</h2><p class="small muted">Chaque page a une mise en page d'impression : ouvre la page voulue puis « Imprimer / PDF » (choisir « Enregistrer au format PDF »). Les fiches élève et AESH tiennent sur une page A4.</p></div>
    <div class="card"><h2>Zone de danger</h2><p class="small muted">Réinitialiser remet les données de départ (import des tableaux Individuels / Mutualisés). Tes saisies dans ce navigateur sont perdues — exporte un JSON avant.</p>
-    <div class="toolbar"><button class="btn danger" onclick="if(confirm('Remettre les données initiales ? Tes modifications seront perdues.')){localStorage.removeItem('${KEY}');location.reload()}">Réinitialiser</button>
-    <button class="btn danger" onclick="if(confirm('Supprimer tous les créneaux du planning ?')){S.creneaux=[];commit('planning','Planning vidé')}">Vider le planning</button></div>
+    <div class="toolbar"><button class="btn danger" onclick="reinitialiser()">Réinitialiser</button>
+    <button class="btn danger" onclick="viderPlanning()">Vider le planning</button></div>
     <h2 style="margin-top:18px">Listes de valeurs</h2><p class="small">Statuts de dossier : ${STATUTS.map(s => `<span class="pill neutral">${s}</span>`).join(' ')}</p><p class="small">Sites : ${SITES.join(', ')} · Niveaux : ${NIVEAUX.join(', ')}</p>
     <h2 style="margin-top:18px">Chiffres</h2><p class="small muted">${S.eleves.length} élèves (${S.eleves.filter(e => e.archive).length} archivés) · ${S.aesh.length} AESH · ${S.classes.length} classes · ${S.affectations.length} affectations · ${S.creneaux.length} créneaux · ${S.journal.length} entrées de journal · ${(JSON.stringify(S).length / 1024).toFixed(0)} Ko</p></div></div>
   ${carteRegles()}
@@ -2086,14 +2153,58 @@ window.setCal = (k, v) => { S.calendrier[k] = v; commit('param', `Calendrier : $
 window.setCalLigne = (liste, i, k, v) => { S.calendrier[liste][i][k] = v; commit('param', `Calendrier : ${liste} modifié`); };
 window.addCalLigne = liste => { S.calendrier[liste].push(liste === 'vacances' ? { nom: '', debut: '', fin: '' } : { nom: '', date: '' }); commit('param', `Calendrier : ligne ajoutée (${liste})`); };
 window.delCalLigne = (liste, i) => { S.calendrier[liste].splice(i, 1); commit('param', `Calendrier : ligne retirée (${liste})`); };
-window.nouvelleAnneeCalendrier = () => { if (!confirm('Vider les vacances et les jours fériés pour préparer la nouvelle année scolaire ? (les créneaux ne sont pas touchés)')) return; const an = prompt('Nouvelle année scolaire (ex. 2027-2028) :', ''); if (an === null) return; S.calendrier = { annee: an || '', refLundi: '', refQ: 'Q1', vacances: [], feries: [] }; commit('param', 'Calendrier : nouvelle année préparée'); };
+window.enregistrerEtab = () => { S.etablissement = document.getElementById('p-etab').value; S.annee = document.getElementById('p-annee').value; commit('param', 'Paramètres modifiés'); toast('Enregistré'); };
+window.viderPlanning = async () => { if (await demander('Supprimer tous les créneaux du planning ?', { ok: 'Vider le planning', danger: true })) { S.creneaux = []; commit('planning', 'Planning vidé'); } };
+// Réinitialiser : sur un appareil synchronisé, on reprend les données en ligne (jamais un envoi de données vides à tous les appareils)
+window.reinitialiser = async () => { if (!(await demander('Remettre les données de cet appareil à zéro ?\n\nSi la synchro est connectée, cet appareil reprend ensuite les données en ligne de tes autres appareils.', { ok: 'Réinitialiser cet appareil', danger: true }))) return;
+  try { localStorage.setItem(KEY + '-avant-reinit', localStorage.getItem(KEY) || ''); } catch (e) { } ['cockpit-sync-vu2', 'cockpit-sync-base2'].forEach(k => { try { localStorage.removeItem(k); } catch (e) { } }); try { indexedDB.deleteDatabase('cockpit-sync'); } catch (e) { }
+  localStorage.removeItem(KEY); location.reload(); };
+window.nouvelleAnneeCalendrier = async () => { if (!(await demander('Vider les vacances et les jours fériés pour préparer la nouvelle année scolaire ? (les créneaux ne sont pas touchés)', { ok: 'Continuer' }))) return; const an = await saisir('Nouvelle année scolaire (ex. 2027-2028) :', '', { ok: 'Enregistrer' }); if (an === null) return; S.calendrier = { annee: an || '', refLundi: '', refQ: 'Q1', vacances: [], feries: [] }; commit('param', 'Calendrier : nouvelle année préparée'); };
 // Synchro : un remplacement retiré sur cet appareil ne revient pas avec les données (plus anciennes) d'un autre appareil
 function garderRetraits(d) { const loc = (S && S.prisesRetirees) || {}, RT = d.prisesRetirees = d.prisesRetirees || {};
   Object.keys(loc).forEach(id => { if (!RT[id] || (loc[id].le || '') > (RT[id].le || '')) RT[id] = loc[id]; });
   d.prisesOcc = (d.prisesOcc || []).filter(x => { const t = RT[x.occId]; return !t || (x.priseLe || '') > (t.priseLe || ''); }); return d; }
-window.cockpitSync = { cle: KEY, appliquer: d => { S = migrate(garderRetraits(d)); if (DOUBLONS_FUSIONNES.length) { log('eleve', 'Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')); S._savedAt = new Date().toISOString(); } localStorage.setItem(KEY, JSON.stringify(S)); verifierRetours(); render(); } }; // retours d'absence aussi vérifiés après réception // synchro chiffrée (js/sync.js)
+/* 20/11 : données reçues d'un autre appareil PENDANT une saisie (fenêtre ouverte, champ en cours) : on ne remplace pas la page sous
+   les doigts. Elles sont enregistrées tout de suite (la synchro reste juste), affichées dès la fin de la saisie, et si la saisie
+   est validée entre-temps, les deux sont réunies (rien n'est perdu, ni ici ni sur l'autre appareil). */
+let syncEnAttente = null; // { base : état affiché avant la saisie, recu : état reçu }
+function editionEnCours() {
+  if (document.querySelector('.boite-ui')) return true;
+  const m = document.getElementById('modal'); if (m && m.firstElementChild) return true;
+  const a = document.activeElement, page = document.getElementById('page');
+  return !!(a && page && page.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && !/^(checkbox|radio|button|file)$/i.test(a.type || ''));
+}
+function reunirSyncEnAttente() {
+  if (!syncEnAttente) return; const { base, recu } = syncEnAttente; syncEnAttente = null;
+  const R2 = window.cockpitSyncTest && window.cockpitSyncTest.reunirEtats;
+  S = migrate(R2 ? R2(base, JSON.parse(JSON.stringify(S)), recu) : recu);
+}
+function appliquerSyncEnAttente() {
+  if (!syncEnAttente || editionEnCours()) return;
+  S = migrate(syncEnAttente.recu); syncEnAttente = null; verifierRetours(); render();
+}
+document.addEventListener('focusout', () => setTimeout(appliquerSyncEnAttente, 50));
+window.cockpitSync = { cle: KEY, appliquer: d => {
+  const recu = migrate(garderRetraits(d)); const fus = DOUBLONS_FUSIONNES.slice();
+  if (fus.length) { recu.journal.unshift({ date: new Date().toISOString(), type: 'eleve', texte: 'Doublons fusionnés : ' + fus.join(', ') }); recu._savedAt = new Date().toISOString(); }
+  if (editionEnCours()) { // la page reste telle quelle pendant la saisie
+    if (!syncEnAttente) syncEnAttente = { base: JSON.parse(JSON.stringify(S)) };
+    syncEnAttente.recu = recu; localStorage.setItem(KEY, JSON.stringify(recu)); return;
+  }
+  syncEnAttente = null; S = recu; localStorage.setItem(KEY, JSON.stringify(S)); verifierRetours(); render(); } }; // retours d'absence aussi vérifiés après réception // synchro chiffrée (js/sync.js)
 window.exportJSON = () => dl(`cockpit-pas_${S.annee}_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S, null, 1));
-window.importJSON = file => { if (!file) return; const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); if (!d.eleves || !d.aesh) throw 0; S = migrate(d); log('import', `JSON importé : ${file.name}`); save(); render(); toast('Import réussi'); } catch { alert('Fichier JSON invalide.'); } }; r.readAsText(file); };
+// Importer JSON = remettre une sauvegarde complète : cela REMPLACE toutes les données (et celles des autres appareils synchronisés).
+// 20/11 : confirmation dans l'appli avec la date et le nombre d'élèves du fichier, copie des données actuelles gardée ;
+// un fichier « mise à jour » déposé ici par erreur part dans « Importer une mise à jour » (rien n'est remplacé).
+window.importJSON = file => { if (!file) return; const r = new FileReader(); r.onload = async () => {
+  let d; try { d = JSON.parse(r.result); } catch { return alert('Fichier JSON illisible.'); }
+  if (d && d.type === 'edt-aesh') { toast('Fichier de mise à jour : ouverture de « Importer une mise à jour »'); return window.importEdtAesh(file); }
+  if (!d || !Array.isArray(d.eleves) || !Array.isArray(d.aesh)) return alert("Ce fichier n'est pas une sauvegarde complète du cockpit.");
+  const nF = d.eleves.filter(e => !e.archive).length, nI = S.eleves.filter(e => !e.archive).length, quand = d._savedAt ? new Date(d._savedAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : 'date inconnue';
+  const plusVieux = d._savedAt && S._savedAt && d._savedAt < S._savedAt;
+  if (!(await demander(`Remplacer TOUTES les données par cette sauvegarde ?\n\nFichier : ${file.name}\nEnregistré le ${quand} · ${nF} élèves (actuellement ${nI}).${plusVieux ? '\n\n⚠ Cette sauvegarde est plus ancienne que tes données actuelles : ce que tu as saisi depuis sera remplacé, aussi sur tes autres appareils.' : ''}\n\nUne copie des données actuelles est gardée sur cet appareil.`, { ok: 'Remplacer par cette sauvegarde', danger: true }))) return;
+  try { localStorage.setItem(KEY + '-avant-import', localStorage.getItem(KEY) || ''); } catch (e) { }
+  S = migrate(d); log('import', `JSON importé : ${file.name} (${quand})`); save(); render(); toast('Import réussi'); }; r.readAsText(file); };
 /* ---- Mise à jour d'emplois du temps AESH depuis un fichier préparé (type « edt-aesh ») ----
    Le fichier nomme l'AESH et les élèves (NOM Prénom) ; rien n'est remplacé avant ta validation.
    Pour chaque AESH : ses créneaux sont remplacés par ceux du fichier (un créneau identique garde son id,
@@ -2134,7 +2245,7 @@ function appliquerEdtAesh(f) {
   const manque = plans.filter(p => !p.aId || p.noms.some(n => !p.ids[n]));
   if (manque.length || d.eleves.some((x, i) => !f['fe' + i]) || d.affectations.some((x, i) => !f['aa' + i] || (d.eleves.findIndex(y => y.eleve === x.eleve) < 0 && !f['ae' + i]))) { alert('Choisis l\'AESH et chaque élève avant d\'enregistrer.'); return false; }
   if (new Set(plans.map(p => p.aId)).size < plans.length) { alert('La même AESH est choisie pour deux emplois du temps.'); return false; }
-  try { localStorage.setItem(KEY + '-avant-edt', JSON.stringify({ le: new Date().toISOString(), etat: S })); } catch (e) { if (!confirm('Impossible de garder une copie de sauvegarde (mémoire pleine). Continuer quand même ?')) return false; }
+  try { localStorage.setItem(KEY + '-avant-edt', JSON.stringify({ le: new Date().toISOString(), etat: S })); } catch (e) { const fm = $('#mform'); if (!(fm && fm.dataset.sansCopie)) { demander('Impossible de garder une copie de sauvegarde (mémoire pleine). Continuer quand même ?', { ok: 'Continuer sans copie' }).then(oui => { const f2 = $('#mform'); if (oui && f2) { f2.dataset.sansCopie = '1'; $('#m-ok').click(); } }); return false; } }
   const resume = [];
   plans.forEach(({ x, aId, noms, ids }) => { const a = aesh(aId);
     const anciens = S.creneaux.filter(c => c.aeshId === aId); const cle = c => [c.eleveId, c.jour, c.debut, c.fin, c.groupe || ''].join('|');
@@ -2169,8 +2280,8 @@ function appliquerEdtAesh(f) {
   commit('planning', `Mise à jour importée (${d.source || 'fichier'}) — ` + resume.join(' ; '));
   alert('Mise à jour enregistrée :\n\n' + (resume.join('\n') || 'aucun changement'));
 }
-window.annulerEdtAesh = () => { let s; try { s = JSON.parse(localStorage.getItem(KEY + '-avant-edt') || 'null'); } catch { s = null; } if (!s) { alert('Aucune mise à jour d\'EDT à annuler.'); return; }
-  if (!confirm(`Revenir à l'état d'avant la mise à jour d'EDT du ${new Date(s.le).toLocaleString('fr-FR')} ? Ce que tu as modifié depuis serait perdu.`)) return;
+window.annulerEdtAesh = async () => { let s; try { s = JSON.parse(localStorage.getItem(KEY + '-avant-edt') || 'null'); } catch { s = null; } if (!s) { alert('Aucune mise à jour d\'EDT à annuler.'); return; }
+  if (!(await demander(`Revenir à l'état d'avant la mise à jour d'EDT du ${new Date(s.le).toLocaleString('fr-FR')} ? Ce que tu as modifié depuis serait perdu.`, { ok: 'Revenir en arrière', danger: true }))) return;
   S = migrate(s.etat); try { localStorage.removeItem(KEY + '-avant-edt'); } catch (e) { } commit('planning', 'Mise à jour d\'EDT annulée'); toast('Mise à jour annulée'); };
 const csvLine = arr => arr.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(';');
 function elevesRows() { return S.eleves.map(e => { const c = couverture(e); return { Nom: e.nom, Prénom: e.prenom, Site: e.site, Niveau: e.niveau, Classe: e.classe, Type: e.type, Statut: e.statut, "Nombre d'heures à couvrir": e.heures ?? '', 'Heures prévisionnelles': e.heuresPrev ?? '', 'Heures couvertes': couvertes(e), Couverture: c.l, AESH: affOf(e).filter(a => a.heures > 0).map(a => `${aesh(a.aeshId)?.nom} (${a.heures} h)`).join(', '), GEVASCO: e.gevasco, 'Fin notification': e.notifFin, 'N° dossier': e.numDossier, Adresse: e.adresse, Responsables: e.responsables, Téléphone: e.tel, Remarques: e.remarques, Archivé: e.archive ? 'oui' : '', 'Aménagements PPS': ppsCount(e) }; }); }
@@ -2197,7 +2308,7 @@ window.exportWordEleve = id => { const e = eleve(id); const c = couverture(e); c
   <h2>Créneaux</h2><table><tr><th>Jour</th><th>Horaire</th><th>AESH</th></tr>${S.creneaux.filter(x => x.eleveId === id).sort((p, q) => p.jour - q.jour || t2m(p.debut) - t2m(q.debut)).map(x => `<tr><td>${JOURS[x.jour - 1]}</td><td>${x.debut}–${x.fin}</td><td>${esc(aesh(x.aeshId)?.nom)}</td></tr>`).join('') || '<tr><td colspan="3">Aucun</td></tr>'}</table>
   <h2>Remarques</h2><p>${esc(e.remarques) || '—'}</p>`); };
 window.exportWordAesh = id => { const a = aesh(id); const c = charge(a);
-  wordDoc(`Fiche AESH ${a.nom}`, `<table><tr><th>Site</th><td>${a.site}</td></tr><tr><th>Quotité hebdo</th><td>${a.quotite ?? '?'} h</td></tr><tr><th>Individuel / Mutualisé</th><td>${hf(c.ind)} / ${hf(c.mut)}</td></tr><tr><th>Total affecté</th><td>${hf(c.tot)}</td></tr><tr><th>Reste disponible</th><td>${c.reste == null ? '?' : hf(c.reste)}</td></tr></table>
+  wordDoc(`Fiche AESH ${a.nom}`, `<table><tr><th>Site</th><td>${a.site}</td></tr><tr><th>Quotité hebdo</th><td>${a.quotite ?? '?'} h</td></tr><tr><th>Individuel / Mutualisé</th><td>${hf(c.ind)} / ${hf(c.mut)}</td></tr>${c.autres ? `<tr><th>Collectif</th><td>${hf(c.autres)}</td></tr>` : ''}${c.coordo ? `<tr><th>Coordination</th><td>${hf(c.coordo)}</td></tr>` : ''}<tr><th>Total affecté</th><td>${hf(c.tot)}</td></tr><tr><th>Reste disponible</th><td>${c.reste == null ? '?' : hf(c.reste)}</td></tr></table>
   <h2>Élèves suivis</h2><table><tr><th>Élève</th><th>Classe</th><th>Type</th><th>Heures</th></tr>${affOfAesh(a).map(x => { const e = eleve(x.eleveId); return `<tr><td>${esc(e.nom)} ${esc(e.prenom)}</td><td>${esc(e.classe)}</td><td>${e.type}</td><td>${hf(x.heures)}</td></tr>`; }).join('')}</table>
   <h2>Emploi du temps</h2><table><tr><th>Jour</th><th>Horaire</th><th>Élève</th></tr>${S.creneaux.filter(x => x.aeshId === id).sort((p, q) => p.jour - q.jour || t2m(p.debut) - t2m(q.debut)).map(x => `<tr><td>${JOURS[x.jour - 1]}</td><td>${x.debut}–${x.fin}</td><td>${esc(eleve(x.eleveId)?.nom)} ${esc(eleve(x.eleveId)?.prenom)} (${esc(eleve(x.eleveId)?.classe)})</td></tr>`).join('') || '<tr><td colspan="3">Aucun</td></tr>'}</table>`); };
 window.exportWordSynthese = () => { const rows = SITES.map(s => { const st = stats(S.eleves.filter(e => e.site === s)), rs = ressource(s); return `<tr><td>${s}</td><td>${st.n}</td><td>${st.ind}</td><td>${st.mut}</td><td>${st.pending}</td><td>${hf(st.cible)}</td><td>${hf(st.couv)}</td><td>${hf(st.reste)}</td><td>${rs.n}</td><td>${hf(rs.vol)}</td><td>${hf(rs.reste)}</td></tr>`; }).join('');
@@ -2471,8 +2582,8 @@ window.modifierAbsence = id => {
     const avant = `${(aesh(ab.aeshId) || {}).nom || '?'}, ${ab.motif}, ${frDate(ab.debut)} → ${frDate(ab.fin)}`;
     ab.aeshId = d.aid; ab.motif = d.motif; ab.debut = d.debut; ab.fin = d.fin;
     commit('aesh', `Absence terminée modifiée (${avant}) → ${a.nom}, ${d.motif}, ${frDate(d.debut)} → ${frDate(d.fin)}`); setTimeout(() => publierAuto(), 100);
-  }, () => {
-    if (!confirm(`Supprimer l'absence de ${(aesh(ab.aeshId) || {}).nom || '?'} (${ab.motif}, ${ab.debut ? frDate(ab.debut) : '—'} → ${ab.fin ? frDate(ab.fin) : '—'}) ?${nbLiens ? `\n\nSont aussi supprimés : ${L.arch.length} remplacement(s) archivé(s), ${L.segs.length} remplacement(s) partiel(s), ${L.prises.length} prise(s) faite(s) en ligne.` : ''}`)) return;
+  }, async () => {
+    if (!(await demander(`Supprimer l'absence de ${(aesh(ab.aeshId) || {}).nom || '?'} (${ab.motif}, ${ab.debut ? frDate(ab.debut) : '—'} → ${ab.fin ? frDate(ab.fin) : '—'}) ?${nbLiens ? `\n\nSont aussi supprimés : ${L.arch.length} remplacement(s) archivé(s), ${L.segs.length} remplacement(s) partiel(s), ${L.prises.length} prise(s) faite(s) en ligne.` : ''}`, { ok: 'Supprimer', danger: true }))) return;
     S.absences = S.absences.filter(x => x !== ab); S.archives = (S.archives || []).filter(r => !L.arch.includes(r)); S.segmentsRempl = (S.segmentsRempl || []).filter(g => !L.segs.includes(g)); S.prisesOcc = (S.prisesOcc || []).filter(p => !L.prises.includes(p));
     commit('aesh', `Absence supprimée : ${(aesh(ab.aeshId) || {}).nom || '?'}, ${ab.motif}, ${ab.debut ? frDate(ab.debut) : '—'} → ${ab.fin ? frDate(ab.fin) : '—'}`);
   });
@@ -2489,7 +2600,7 @@ function modal(html, onSave, onDelete) {
   const first = form.querySelector('input,select'); if (first) first.focus();
   document.onkeydown = e => { if (e.key === 'Escape') closeModal(); };
 }
-window.closeModal = () => { $('#modal').innerHTML = ''; document.onkeydown = null; };
+window.closeModal = () => { $('#modal').innerHTML = ''; document.onkeydown = null; setTimeout(appliquerSyncEnAttente, 0); };
 
 /* ====================== INIT ====================== */
 load(); if (DOUBLONS_FUSIONNES.length) { log('eleve', 'Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')); save(); setTimeout(() => toast('Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')), 800); } { const nd = appliquerDossiers() + appliquerEss() + appliquerStatuts(); if (nd) { log('eleve', 'Fiches élèves mises à jour d\'après les documents (PPS, MOPPS, notifications, GEVASCO…)'); save(); } } chargerDossiers(); if (synchroDispositifs()) { log('affectation', 'Élèves ULIS / SEGPA rattachés automatiquement aux AESH de leur dispositif'); save(); } render(); verifierRetours(); essVerifierRappel(); setInterval(essVerifierRappel, 60000); ccVerifierRappel(); setInterval(ccVerifierRappel, 60000);

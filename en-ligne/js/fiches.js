@@ -164,13 +164,13 @@ window.fichesImprimer = async () => {
   } catch (e) { w.document.body.innerHTML = '<p style="font:16px sans-serif;color:#b3261e">Impossible de fabriquer les QR codes : ' + esc(e.message) + '</p>'; }
 };
 
-window.fichesNouveauCode = () => {
-  if (!confirm("Créer un nouveau code d'équipe ? L'ancien ne marchera plus dès que tu auras déposé la nouvelle page sur Netlify. Toutes les AESH devront taper le nouveau code.")) return;
+window.fichesNouveauCode = async () => {
+  if (!(await window.demander("Créer un nouveau code d'équipe ? L'ancien ne marchera plus dès que tu auras déposé la nouvelle page sur Netlify. Toutes les AESH devront taper le nouveau code.", { ok: 'Créer un nouveau code', danger: true }))) return;
   const f = etat(); f.code = nouveauCode(); f.change = new Date().toISOString(); sauver(); window.pageFichesAesh();
   toast('Nouveau code créé : fabrique la page et dépose-la sur Netlify');
 };
-window.fichesSite = () => {
-  const f = etat(), v = prompt('Adresse du site des fiches sur Netlify :', f.site); if (v === null) return;
+window.fichesSite = async () => {
+  const v = await window.saisir('Adresse du site des fiches sur Netlify :', etat().site || '', { ok: 'Enregistrer' }); if (v === null || !v.trim()) return; const f = etat();
   let u = v.trim(); if (!/^https?:\/\//.test(u)) u = 'https://' + u; f.site = u.replace(/[#?].*$/, '').replace(/\/?$/, '/'); sauver(); window.pageFichesAesh();
 };
 window.fichesCopier = (t, b) => navigator.clipboard.writeText(t).then(() => { b.textContent = 'Copié'; }, () => toast('Sélectionne le code et copie-le.'));
