@@ -534,6 +534,9 @@ function migrate(s) {
   s.aesh.forEach(a => { a.statut = a.statut || 'Actif'; a.heuresAutres = a.heuresAutres ?? null; a.email = a.email || ''; a.hs = a.hs || { autorise: 0, depuis: '', mouvements: [] }; if (a.dispositif === undefined) a.dispositif = /SEGPA/i.test(a.remarques || '') ? 'SEGPA' : /ULIS/i.test(a.remarques || '') ? 'ULIS' : ''; });
   s.absences = s.absences || [];
   if (!s.coordoInit) { s.coordoInit = true; const co = s.aesh.filter(a => a.id === 'a9' && /^C[ée]cile\b/i.test(a.nom || '')); if (co.length === 1 && co[0].heuresCoordo == null) co[0].heuresCoordo = 1; } // 20/11 : 1 h de coordination (fiche AESH de la coordinatrice)
+  if (!s.mailsCorr2111) { s.mailsCorr2111 = true; // 21/11 : adresses mail corrigées par Hanan (les anciennes revenaient en erreur)
+    for (const [re, mail] of [[/\bLACROIX\b/i, 'Clacroix13@ac-lyon.fr'], [/\bBEN[\s-]*SAADI\b/i, 'Farida.Ben-Saadi@ac-lyon.fr']]) { const L = s.aesh.filter(a => re.test(a.nom || '')); if (L.length === 1) L[0].email = mail; }
+  }
   s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
   s.questions = s.questions || [];
   // questions ajoutées par Claude : chaque question n'est ajoutée qu'une fois (suivi dans questionsAjoutees), ce que Cécile supprime ou coche n'est pas recréé
