@@ -602,6 +602,14 @@ function fusionnerDoublons(s) {
   const vcl = new Set(); s.classes = (s.classes || []).filter(c => { const k = String(c.nom || '').trim().toLowerCase(); if (k && vcl.has(k)) return false; vcl.add(k); return true; });
   return fus;
 }
+// 22/11 : changement de nom de Nadia (AESH SEGPA), appliqué une seule fois (drapeau nomHeritier2211) : fiche AESH et tous les textes
+// où le nom apparaît (élèves, remarques, questions, conseils, journal...). L'adresse mail et le nom de la photo d'EDT ne sont pas touchés.
+function renommerHeritier(s) {
+  const re = /\bBEN[\s-]*KAA?[\s-]*KAA?\b|\bBENKAKA\b/gi, garder = new Set(['email', 'edt', 'id']);
+  const parcourir = (o, k0) => { if (typeof o === 'string') return garder.has(k0) ? o : o.replace(re, 'HÉRITIER'); if (Array.isArray(o)) { o.forEach((v, i) => { o[i] = parcourir(v, k0); }); return o; }
+    if (o && typeof o === 'object') Object.keys(o).forEach(k => { o[k] = parcourir(o[k], k); }); return o; };
+  for (const k of ['aesh', 'eleves', 'classes', 'questions', 'conseils', 'datesEtab', 'journal', 'absences', 'archives', 'evals']) if (s[k]) parcourir(s[k], k);
+}
 function migrate(s) {
   s.affConfirmees = s.affConfirmees || []; s.affectations.forEach(x => { if (x.aConfirmer && s.affConfirmees.includes(cleAff(x))) x.aConfirmer = false; });
   s.schemaVersion = s.schemaVersion || 1;
@@ -612,6 +620,7 @@ function migrate(s) {
   if (!s.mailsCorr2111) { s.mailsCorr2111 = true; // 21/11 : adresses mail corrigées par Hanan (les anciennes revenaient en erreur)
     for (const [re, mail] of [[/\bLACROIX\b/i, 'Clacroix13@ac-lyon.fr'], [/\bBEN[\s-]*SAADI\b/i, 'Farida.Ben-Saadi@ac-lyon.fr']]) { const L = s.aesh.filter(a => re.test(a.nom || '')); if (L.length === 1) L[0].email = mail; }
   }
+  if (!s.nomHeritier2211) { s.nomHeritier2211 = true; renommerHeritier(s); } // 22/11 : Nadia BEN KAA KAA (AESH SEGPA) s'appelle maintenant Nadia HÉRITIER
   s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
   s.questions = s.questions || [];
   // questions ajoutées par Claude : chaque question n'est ajoutée qu'une fois (suivi dans questionsAjoutees), ce que Cécile supprime ou coche n'est pas recréé
@@ -820,6 +829,19 @@ function couvertureAnnuelle() {
   const st = stats(S.eleves.filter(e => !dispositifDe(e)));
   return { cible: st.cible, couv: st.couv, reste: st.cible - st.couv, n: st.n };
 }
+// Effectif des élèves suivis (règle de Hanan du 22/11) : tous les élèves suivis en voie ordinaire (notifiés + dossiers en cours,
+// ULIS du lycée pro comprise) + les élèves VRAIMENT NOTIFIÉS MDPH des dispositifs SEGPA et ULIS du collège.
+// On les compte comme élèves, mais leurs heures restent hors du quota horaire (heures SEGPA, heures collectives ULIS) :
+// couvertureAnnuelle() et ressourceOrdinaire() ne changent pas.
+function effectifSuivis() {
+  const act = S.eleves.filter(isActive), ord = act.filter(e => !dispositifDe(e));
+  const segpa = act.filter(e => dispositifDe(e) === 'SEGPA' && e.statut === 'Notifié'), ulis = act.filter(e => dispositifDe(e) === 'ULIS' && e.statut === 'Notifié');
+  const L = [...ord, ...segpa, ...ulis], typ = (l, t) => l.filter(e => e.type === t).length, st = re => ord.filter(e => re.test(e.statut || '')).length;
+  return { n: L.length, ind: typ(L, 'Individuel'), mut: typ(L, 'Mutualisé'), notifies: L.filter(e => e.statut === 'Notifié').length,
+    segpa: segpa.length, ulis: ulis.length, segpaI: typ(segpa, 'Individuel'), segpaM: typ(segpa, 'Mutualisé'), ulisI: typ(ulis, 'Individuel'), ulisM: typ(ulis, 'Mutualisé'),
+    renouv: st(/^Dossier renouvellement/), premiere: st(/^Dossier 1/), autres: ord.filter(e => e.statut !== 'Notifié' && !/^Dossier (renouvellement|1)/.test(e.statut || '')).length };
+}
+const dontDisp = (s, u) => [s ? s + ' SEGPA' : '', u ? u + ' ULIS collège' : ''].filter(Boolean).join(', ');
 // Heures qu'une AESH de dispositif donne à la voie ordinaire : ULIS = quotité − heures collectives ULIS (ex. 26 − 16 = 10 h) ;
 // SEGPA = seulement les heures déjà attribuées à des élèves en voie ordinaire (aucune pour l'instant)
 const COULEUR_COORDO = '#E0A526';
@@ -1553,10 +1575,11 @@ function pageSynthese() {
   const bySite = SITES.map(s => { const st = stats(S.eleves.filter(e => e.site === s)), rs = ressource(s); return `<tr><td>${s}</td><td class="num">${st.n}</td><td class="num">${st.ind}</td><td class="num">${st.mut}</td><td class="num">${st.pending}</td><td class="num">${hf(st.cible)}</td><td class="num">${hf(st.couv)}</td><td class="num ${st.reste > 0 ? 'bad' : ''}">${hf(st.reste)}</td><td class="num">${rs.n}</td><td class="num">${hf(rs.vol)}</td><td class="num" style="color:${rs.reste < 0 ? 'var(--bad)' : 'var(--ok)'}">${hf(rs.reste)}</td></tr>`; }).join('');
   $('#page').innerHTML = `<div class="print-title">Synthèse PAS — ${esc(S.annee)}</div>
   <div class="kpis">
-    ${(() => { const sg = S.eleves.filter(e => isActive(e) && dispositifDe(e) === 'SEGPA' && e.statut === 'Notifié'); const nI = sg.filter(e => e.type === 'Individuel').length, nM = sg.filter(e => e.type === 'Mutualisé').length;
-      return kpi(g.n + sg.length, `élèves suivis (hors ULIS${sg.length ? `, dont ${sg.length} SEGPA notifié${sg.length > 1 ? 's' : ''}` : ', hors SEGPA'})`, '', "javascript:gotoElevesType('')") + kpi(g.ind + nI, 'individuels' + (nI ? ` (dont ${nI} SEGPA)` : ''), 'indiv', "javascript:gotoElevesType('Individuel')") + kpi(g.mut + nM, 'mutualisés' + (nM ? ` (dont ${nM} SEGPA)` : ''), 'mutu', "javascript:gotoElevesType('Mutualisé')"); })()}
+    ${(() => { const f = effectifSuivis(), d = dontDisp(f.segpa, f.ulis), dI = dontDisp(f.segpaI, f.ulisI), dM = dontDisp(f.segpaM, f.ulisM);
+      const det = [`<b>${f.notifies}</b> notifié${f.notifies > 1 ? 's' : ''} MDPH${d ? ` (dont ${d})` : ''}`, f.renouv ? `<b>${f.renouv}</b> renouvellement${f.renouv > 1 ? 's' : ''} déposé${f.renouv > 1 ? 's' : ''}` : '', f.premiere ? `<b>${f.premiere}</b> 1<sup>re</sup> demande${f.premiere > 1 ? 's' : ''} déposée${f.premiere > 1 ? 's' : ''}` : '', f.autres ? `<b>${f.autres}</b> dossier${f.autres > 1 ? 's' : ''} à monter / vigilance` : ''].filter(Boolean).join('<br>');
+      return `<a href="javascript:gotoElevesType('')" class="kpi" style="text-decoration:none;color:inherit;cursor:pointer"><div class="v">${f.n}</div><div class="l">élèves suivis</div><div class="small" style="margin-top:6px;line-height:1.45;border-top:1px solid var(--line);padding-top:5px">${det}</div><div class="small muted" style="margin-top:4px">Heures SEGPA et heures collectives ULIS hors quota horaire.</div></a>` + kpi(f.ind, 'individuels' + (dI ? ` (dont ${dI})` : ''), 'indiv', "javascript:gotoElevesType('Individuel')") + kpi(f.mut, 'mutualisés' + (dM ? ` (dont ${dM})` : ''), 'mutu', "javascript:gotoElevesType('Mutualisé')"); })()}
     ${kpi(hf(r.vol), "volume horaire disponible AESH / semaine (voie ordinaire, avec la part ordinaire des AESH ULIS, hors arrêts longue durée)", 'indiv')}${(() => { const ordAct = S.eleves.filter(e => isActive(e) && !dispositifDe(e)); const hInd = ordAct.filter(e => e.type === 'Individuel').reduce((t, e) => t + (e.heures || 0), 0); const mutE = ordAct.filter(e => e.type === 'Mutualisé'); const nCl = new Set(mutE.map(e => e.classe)).size;
-      return `<div class="kpi"><div class="v">${hf(hs.cible)}</div><div class="l">volume horaire total à couvrir / semaine (hors élèves SEGPA et ULIS)</div><div class="small" style="margin-top:6px;line-height:1.45;border-top:1px solid var(--line);padding-top:5px">dont <b>${hf(hInd)}</b> pour les élèves en individuel (quotités notifiées)<br>dont <b>${hf(hs.cible - hInd)}</b> pour les mutualisés, partagées par classe${nCl ? ` (${nCl} classe${nCl > 1 ? 's' : ''}, ${mutE.length} élève${mutE.length > 1 ? 's' : ''})` : ''}</div></div>`; })()}${kpi(hf(hs.couv), 'volume d\'heures déjà attribuées aux AESH sur ces heures à couvrir', hs.reste > 0 ? 'warn' : 'ok')}
+      return `<div class="kpi"><div class="v">${hf(hs.cible)}</div><div class="l">volume horaire total à couvrir / semaine (hors élèves SEGPA et ULIS du collège)</div><div class="small" style="margin-top:6px;line-height:1.45;border-top:1px solid var(--line);padding-top:5px">dont <b>${hf(hInd)}</b> pour les élèves en individuel (quotités notifiées)<br>dont <b>${hf(hs.cible - hInd)}</b> pour les mutualisés, partagées par classe${nCl ? ` (${nCl} classe${nCl > 1 ? 's' : ''}, ${mutE.length} élève${mutE.length > 1 ? 's' : ''})` : ''}</div></div>`; })()}${kpi(hf(hs.couv), 'volume d\'heures déjà attribuées aux AESH sur ces heures à couvrir', hs.reste > 0 ? 'warn' : 'ok')}
     ${kpi(r.manq ? '?' : hf(r.reste), r.manq ? 'volume d\'heures restant disponible (quotités manquantes)' : 'volume d\'heures restant disponible', r.manq ? 'warn' : (r.reste < 0 ? 'bad' : 'ok'))}
   </div>
   <div class="grid g4" style="margin-bottom:14px">
@@ -2411,8 +2434,8 @@ window.exportWordAesh = id => { const a = aesh(id); const c = charge(a);
   <h2>Élèves suivis</h2><table><tr><th>Élève</th><th>Classe</th><th>Type</th><th>Heures</th></tr>${affOfAesh(a).map(x => { const e = eleve(x.eleveId); return `<tr><td>${esc(e.nom)} ${esc(e.prenom)}</td><td>${esc(e.classe)}</td><td>${e.type}</td><td>${hf(x.heures)}</td></tr>`; }).join('')}</table>
   <h2>Emploi du temps</h2><table><tr><th>Jour</th><th>Horaire</th><th>Élève</th></tr>${S.creneaux.filter(x => x.aeshId === id).sort((p, q) => p.jour - q.jour || t2m(p.debut) - t2m(q.debut)).map(x => `<tr><td>${JOURS[x.jour - 1]}</td><td>${x.debut}–${x.fin}</td><td>${esc(eleve(x.eleveId)?.nom)} ${esc(eleve(x.eleveId)?.prenom)} (${esc(eleve(x.eleveId)?.classe)})</td></tr>`).join('') || '<tr><td colspan="3">Aucun</td></tr>'}</table>`); };
 window.exportWordSynthese = () => { const rows = SITES.map(s => { const st = stats(S.eleves.filter(e => e.site === s)), rs = ressource(s); return `<tr><td>${s}</td><td>${st.n}</td><td>${st.ind}</td><td>${st.mut}</td><td>${st.pending}</td><td>${hf(st.cible)}</td><td>${hf(st.couv)}</td><td>${hf(st.reste)}</td><td>${rs.n}</td><td>${hf(rs.vol)}</td><td>${hf(rs.reste)}</td></tr>`; }).join('');
-  const g = stats(S.eleves.filter(e => !dispositifDe(e))), r = ressourceOrdinaire(), hs = couvertureAnnuelle();
-  wordDoc('Synthèse PAS', `<table><tr><th>Élèves suivis</th><td>${g.n}</td><th>Nombre d'heures à couvrir</th><td>${hf(hs.cible)}</td></tr><tr><th>Individuels / mutualisés</th><td>${g.ind} / ${g.mut}</td><th>Heures couvertes</th><td>${hf(hs.couv)}</td></tr><tr><th>Dossiers en cours</th><td>${g.pending}</td><th>Volume AESH / reste</th><td>${hf(r.vol)} / ${r.manq ? '?' : hf(r.reste)}</td></tr></table>
+  const g = stats(S.eleves.filter(e => !dispositifDe(e))), f = effectifSuivis(), r = ressourceOrdinaire(), hs = couvertureAnnuelle();
+  wordDoc('Synthèse PAS', `<table><tr><th>Élèves suivis</th><td>${f.n} (dont ${f.notifies} notifiés MDPH${dontDisp(f.segpa, f.ulis) ? ', dont ' + dontDisp(f.segpa, f.ulis) : ''})</td><th>Nombre d'heures à couvrir</th><td>${hf(hs.cible)}</td></tr><tr><th>Individuels / mutualisés</th><td>${f.ind} / ${f.mut}</td><th>Heures couvertes</th><td>${hf(hs.couv)}</td></tr><tr><th>Dossiers en cours</th><td>${g.pending}</td><th>Volume AESH / reste</th><td>${hf(r.vol)} / ${r.manq ? '?' : hf(r.reste)}</td></tr></table>
   <h2>Par site</h2><table><tr><th>Site</th><th>Suivis</th><th>Indiv.</th><th>Mutu.</th><th>Dossiers</th><th>Cibles</th><th>Couvertes</th><th>Reste</th><th>AESH</th><th>Volume</th><th>Dispo</th></tr>${rows}</table>
   <h2>Alertes</h2><ul>${alertes().map(a => `<li>${esc(a.t)}</li>`).join('') || '<li>Aucune</li>'}</ul>`); };
 
