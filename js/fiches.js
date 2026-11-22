@@ -277,7 +277,7 @@ window.pageFichesAesh = function () {
   feOuvert = null;
   pg.innerHTML = `<div class="fe">
     <h1 class="fe-t">Fiches élèves</h1>
-    <div class="fe-sous">${actifs.length} élève${actifs.length > 1 ? 's' : ''} · ${esc(S().annee || '')} · <a href="#" onclick="fichesLiens(event)">Liens NFC</a></div>
+    <div class="fe-sous">${actifs.length} élève${actifs.length > 1 ? 's' : ''} · ${esc(S().annee || '')} · <a href="#" onclick="fichesLiens(event)">Liens NFC</a> · <a href="#" onclick="event.preventDefault();exportFichesJSON()">Exporter en JSON</a></div>
     <div id="fe-admin"${feAdmin ? '' : ' hidden'}>${feGestion(f, E)}</div>
     <input id="fv-q" class="fe-q" type="search" placeholder="Prénom, nom, classe ou AESH…" oninput="fichesVue()" value="${esc(feQ)}">
     <div id="fv-f" class="fe-chips"></div>

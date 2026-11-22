@@ -2235,8 +2235,8 @@ function pageParametres() {
   setTitle('Données & exports'); setTimeout(() => { if (location.hash === '#/parametres') $('#page').insertAdjacentHTML('beforeend', carteDossiers()); }, 0);
   $('#page').innerHTML = `<div class="grid g2">
    <div class="card"><h2>Établissement</h2><div class="form-grid"><label class="f">Nom<input type="text" id="p-etab" value="${esc(S.etablissement)}"></label><label class="f">Année scolaire<input type="text" id="p-annee" value="${esc(S.annee)}"></label></div><div class="toolbar" style="margin:10px 0 0"><button class="btn primary" onclick="enregistrerEtab()">Enregistrer</button></div>
-    <h2 style="margin-top:18px">Sauvegarde JSON</h2><p class="small muted">Le JSON contient tout (élèves, AESH, affectations, créneaux, journal). C'est ta sauvegarde de référence : exporte-le après chaque séance de travail et garde-le dans un dossier sûr.</p>
-    <div class="toolbar"><button class="btn primary" onclick="exportJSON()">Exporter JSON</button><label class="btn">Importer JSON<input type="file" accept=".json" class="sr" onchange="importJSON(this.files[0]);this.value=''"></label></div>
+    <h2 style="margin-top:18px">Sauvegarde JSON</h2><p class="small muted">Le JSON contient tout (élèves, AESH, affectations, créneaux, journal). C'est ta sauvegarde de référence : exporte-le après chaque séance de travail et garde-le dans un dossier sûr. « Exporter les fiches élèves » donne un seul fichier avec chaque élève, son numéro de fiche (QR code) et tous les champs de sa fiche : document confidentiel, pas une sauvegarde.</p>
+    <div class="toolbar"><button class="btn primary" onclick="exportJSON()">Exporter JSON</button><button class="btn" onclick="exportFichesJSON()">Exporter les fiches élèves (JSON)</button><label class="btn">Importer JSON<input type="file" accept=".json" class="sr" onchange="importJSON(this.files[0]);this.value=''"></label></div>
     <h2 style="margin-top:18px">Mise à jour préparée</h2><p class="small muted">Fichier préparé par Claude (emplois du temps AESH lus sur les EDT papier, dates de notification…) : tu vérifies les correspondances et les changements avant qu'ils soient enregistrés.</p>
     <div class="toolbar"><label class="btn">Importer une mise à jour (EDT, fiches élèves, conseils de classe)<input type="file" accept=".json" class="sr" onchange="importEdtAesh(this.files[0]);this.value=''"></label><button class="btn" onclick="annulerEdtAesh()">Annuler la dernière mise à jour</button></div>
     <h2 style="margin-top:18px">Excel / CSV</h2><p class="small muted">Excel = 4 onglets (Élèves, AESH, Affectation, Créneaux). Nécessite une connexion la première fois (librairie chargée à la volée) ; sinon le CSV fonctionne hors ligne.</p>
@@ -2315,12 +2315,35 @@ window.cockpitSync = { cle: KEY, appliquer: d => {
   }
   syncEnAttente = null; S = recu; localStorage.setItem(KEY, JSON.stringify(S)); verifierRetours(); render(); } }; // retours d'absence aussi vérifiés après réception // synchro chiffrée (js/sync.js)
 window.exportJSON = () => dl(`cockpit-pas_${S.annee}_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S, null, 1));
+/* 22/11 : export de toutes les fiches élèves dans un seul fichier JSON, téléchargé sur l'appareil (rien n'est envoyé en ligne).
+   Pour chaque élève : son numéro de fiche (celui du QR code / de la puce NFC), tous les champs de sa fiche, ses AESH (heures),
+   ses créneaux et le contenu de sa fiche AESH (ce que voit la personne qui scanne). Fichier de lecture : ce n'est pas une sauvegarde. */
+window.exportFichesJSON = () => {
+  const codes = (S.fiches && S.fiches.codes) || {}, site = String((S.fiches && S.fiches.site) || '').replace(/\/?$/, '/');
+  const copie = o => JSON.parse(JSON.stringify(o ?? null));
+  const nomA = id => (aesh(id) || {}).nom || '';
+  const L = S.eleves.map(e => {
+    const num = codes[e.id] ? String(codes[e.id]) : '', ap = apercuEleve(e);
+    const affs = S.affectations.filter(a => a.eleveId === e.id).map(a => ({ aesh: nomA(a.aeshId), heures: a.heures ?? 0, ...(a.aConfirmer ? { aConfirmer: true } : {}) }));
+    const crs = S.creneaux.filter(c => c.eleveId === e.id).slice().sort((a, b) => (a.jour - b.jour) || String(a.debut).localeCompare(String(b.debut))).map(c => {
+      const x = copie(c); ['id', 'eleveId', 'aeshId', 'remplacantId', 'jour', 'debut', 'fin'].forEach(k => delete x[k]);
+      return { jour: JOURS_LONGS[c.jour - 1] || c.jour, debut: c.debut, fin: c.fin, aesh: nomA(c.aeshId), ...(c.remplacantId ? { remplacant: nomA(c.remplacantId) } : {}), ...x };
+    });
+    return { numero: num, lienQR: num && site ? site + '#' + num : '', nom: e.nom, prenom: e.prenom, classe: e.classe, ...copie(e),
+      aesh: affs, creneaux: crs, ficheAesh: { classe: e.classe || '', site: e.site || '', dispositif: libDisp(e) || '', accompagnement: ap.accompagnement, aides: ap.aides || [] } };
+  }).sort((a, b) => (a.numero ? 0 : 1) - (b.numero ? 0 : 1) || Number(a.numero || 0) - Number(b.numero || 0) || String(a.nom).localeCompare(String(b.nom), 'fr') || String(a.prenom).localeCompare(String(b.prenom), 'fr'));
+  const out = { type: 'fiches-eleves', note: 'Export des fiches élèves (lecture). Document confidentiel. Ce n\'est pas une sauvegarde : il ne se réimporte pas.', etablissement: S.etablissement || '', annee: S.annee || '', exporteLe: new Date().toISOString(),
+    nombre: L.length, avecNumero: L.filter(x => x.numero).length, eleves: L };
+  dl(`fiches-eleves_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(out, null, 1));
+  toast(`${L.length} fiches élèves exportées (${out.avecNumero} avec numéro) : fichier dans Téléchargements`);
+};
 // Importer JSON = remettre une sauvegarde complète : cela REMPLACE toutes les données (et celles des autres appareils synchronisés).
 // 20/11 : confirmation dans l'appli avec la date et le nombre d'élèves du fichier, copie des données actuelles gardée ;
 // un fichier « mise à jour » déposé ici par erreur part dans « Importer une mise à jour » (rien n'est remplacé).
 window.importJSON = file => { if (!file) return; const r = new FileReader(); r.onload = async () => {
   let d; try { d = JSON.parse(r.result); } catch { return alert('Fichier JSON illisible.'); }
   if (d && d.type === 'edt-aesh') { toast('Fichier de mise à jour : ouverture de « Importer une mise à jour »'); return window.importEdtAesh(file); }
+  if (d && d.type === 'fiches-eleves') return toast("Ce fichier est l'export des fiches élèves (lecture seule) : il ne remplace pas les données. Choisis un fichier cockpit-pas_….json.");
   if (!d || !Array.isArray(d.eleves) || !Array.isArray(d.aesh)) return alert("Ce fichier n'est pas une sauvegarde complète du cockpit.");
   const nF = d.eleves.filter(e => !e.archive).length, nI = S.eleves.filter(e => !e.archive).length, quand = d._savedAt ? new Date(d._savedAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : 'date inconnue';
   const plusVieux = d._savedAt && S._savedAt && d._savedAt < S._savedAt;
