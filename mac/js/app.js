@@ -273,7 +273,50 @@ const ccDeLaSemaine = lundi => { const fin = new Date(lundi + 'T12:00:00'); fin.
 const ccSemaineEnCours = () => { const now = new Date(); return ccDeLaSemaine(isoLocal(lundiDe(aujourdhui()))).filter(c => ccMoment(c) >= now); };
 // semaine montrée par le rappel : la semaine en cours ; le samedi et le dimanche, la semaine qui vient
 const ccLundiRappel = () => { const d = new Date(); const l = isoLocal(lundiDe(aujourdhui())); return (d.getDay() === 6 || d.getDay() === 0) ? lundiSuivant(l, 1) : l; };
-const ccRappel = () => { const lundi = ccLundiRappel(), now = new Date(); const L = ccDeLaSemaine(lundi).filter(c => ccMoment(c) >= now); return { lundi, L, vu: !!(S.conseilsVus || {})['sem:' + lundi] }; };
+const ccRappel = () => { const lundi = ccLundiRappel(), now = new Date(); const L = ccDeLaSemaine(lundi).filter(c => ccMoment(c) >= now), D = deDeLaSemaine(lundi).filter(d => deFinMoment(d) >= now); return { lundi, L, D, vu: !!(S.conseilsVus || {})['sem:' + lundi] }; };
+/* ---- Dates de la cité scolaire (Actu cité : sorties, CA, formations, remise des bulletins…) ----
+   S.datesEtab : [{ id, date, fin, heure, heureFin, titre, detail, source, manuel }] ; montrées dans « Conseils et dates », le bandeau de la semaine et les alertes */
+const deFin = d => d.fin && d.fin > d.date ? d.fin : d.date;
+const deTri = (a, b) => (a.date + (a.heure || '')).localeCompare(b.date + (b.heure || '')) || (a.titre || '').localeCompare(b.titre || '', 'fr');
+const deFinMoment = d => new Date(deFin(d) + 'T' + (d.heureFin || d.heure || '23:59') + ':00');
+const deDeLaSemaine = lundi => { const fin = new Date(lundi + 'T12:00:00'); fin.setDate(fin.getDate() + 6); const f = isoLocal(fin); return (S.datesEtab || []).filter(d => d.date && d.date <= f && deFin(d) >= lundi).sort(deTri); };
+const deHeures = d => d.heure ? (d.heureFin ? heureTxt(d.heure) + ' à ' + heureTxt(d.heureFin) : heureTxt(d.heure)) : '';
+const deQuand = (d, court) => (deFin(d) !== d.date ? `du ${court ? frDate(d.date).slice(0, 5) : frCourt(d.date)} au ${court ? frDate(deFin(d)).slice(0, 5) : frCourt(deFin(d))}` : `${court ? jourDe(d.date).slice(0, 3) + '. ' + frDate(d.date).slice(0, 5) : jourDe(d.date) + ' ' + frCourt(d.date)}`) + (deHeures(d) ? ' · ' + deHeures(d) : '');
+/* 22/11 : Actu cité n° 8 (page 3) — salles et heures des conseils du 1er trimestre (F. Martin salle C223, P. Magnien salle A102) et dates de la cité.
+   Appliqué une seule fois (drapeau actuCite8) ; identifiants fixes : deux appareils qui l'appliquent obtiennent les mêmes lignes. Ce que Hanan modifie ou supprime ensuite n'est pas recréé. */
+const ACTU_CITE_8 = {
+  source: 'Actu cité n° 8', periode: '1er trimestre 2026-2027',
+  conseils: [
+    ['cc-t1-2026-11-26-1700-A102', '2026-11-26', '17:00', 'TG', 'Mme Deroire', 'A102', 'P. MAGNIEN'],
+    ['cc-t1-2026-11-26-1800-A102', '2026-11-26', '18:00', 'TG', 'M. Favre', 'A102', 'P. MAGNIEN'],
+    ['cc-t1-2026-11-26-1900-A102', '2026-11-26', '19:00', 'TG', 'M. Tric', 'A102', 'P. MAGNIEN'],
+    ['cc-t1-2026-11-27-1700-A101', '2026-11-27', '17:00', '3 PMET', '', 'C223', 'F. MARTIN'],
+    ['cc-t1-2026-11-30-1700-A101', '2026-11-30', '17:00', '2 BIND', '', 'C223', 'F. MARTIN'],
+    ['cc-t1-2026-11-30-1700-A102', '2026-11-30', '17:00', 'TG', 'Mme Caballero', 'A102', 'P. MAGNIEN'],
+    ['cc-t1-2026-11-30-1800-A102', '2026-11-30', '18:00', 'TSTI2D', '', 'A102', 'P. MAGNIEN'],
+    ['cc-t1-2026-12-01-1700-A101', '2026-12-01', '17:00', 'T BIND', '', 'C223', 'F. MARTIN'],
+    ['cc-t1-2026-12-01-1700-A102', '2026-12-01', '17:00', 'TSTMG2', '', 'A102', 'P. MAGNIEN'],
+    ['cc-t1-2026-12-01-1830-A102', '2026-12-01', '18:30', 'TSTMG1', '', 'A102', 'P. MAGNIEN']
+  ],
+  dates: [
+    { id: 'de-2026-11-26-cinema', date: '2026-11-26', heure: '14:00', heureFin: '17:00', titre: 'Sortie cinéma 3e + 3 PMET', detail: 'Théorème de Marguerite' },
+    { id: 'de-2026-11-26-ca-college', date: '2026-11-26', heure: '18:00', titre: 'CA Collège', detail: 'Pyramide (budget)' },
+    { id: 'de-2026-11-30-phare', date: '2026-11-30', titre: 'Formation PHARE', detail: 'Tous les personnels du collège (cf. Pronote)' },
+    { id: 'de-2026-11-30-specialites', date: '2026-11-30', fin: '2026-12-11', titre: 'Découverte des spécialités (élèves de 2nde)', detail: 'Chaque élève de 2nde découvre 2 spécialités de 1re générale ou de la voie technologique. Pas de devoirs programmés en 2nde pendant ces deux semaines, ni sur les cours de spécialités de 1re.' },
+    { id: 'de-2026-12-04-telethon', date: '2026-12-04', titre: 'Téléthon', detail: '' },
+    { id: 'de-2026-12-10-bulletins', date: '2026-12-10', titre: 'Soirée de remise des bulletins', detail: 'Classes en trimestre' },
+    { id: 'de-2027-02-05-cop', date: '2027-02-05', titre: 'COP interne', detail: '' }
+  ]
+};
+function appliquerActuCite8(s) {
+  const A = ACTU_CITE_8, prec = x => String(x || '').toLowerCase().replace(/^(mme|me|mr|m)\.?\s+/, '').replace(/[^a-zà-ÿ]/g, '');
+  A.conseils.forEach(([id, date, heure, classe, precision, salle, preside]) => {
+    const e = s.conseils.find(x => x.id === id) || s.conseils.find(x => x.date === date && ccNorm(x.classe) === ccNorm(classe) && prec(x.precision) === prec(precision));
+    if (e) Object.assign(e, { date, heure, salle, preside });
+    else s.conseils.push({ id, date, heure, classe, precision, salle, preside, periode: A.periode, source: A.source });
+  });
+  A.dates.forEach(d => { if (!s.datesEtab.some(x => x.id === d.id)) s.datesEtab.push({ fin: '', heure: '', heureFin: '', ...d, source: A.source }); });
+}
 // élèves suivis dans la classe du conseil (même nom de classe, sans tenir compte des espaces ni de « ULIS ») ; pour « TG + professeur », toutes les TG (groupe à vérifier)
 const ccNorm = s => normClasse(String(s || '').replace(/\bULIS\b/i, ''));
 function ccEleves(c) {
@@ -285,9 +328,9 @@ const ccElevesHtml = (c, court) => { const E = ccEleves(c); if (!E.length) retur
 window.ccVuSemaine = lundi => { S.conseilsVus['sem:' + lundi] = new Date().toISOString(); commit('ess', `Rappel des conseils de classe de la semaine du ${frDate(lundi)} marqué comme vu`); };
 window.ccRevoirSemaine = lundi => { delete S.conseilsVus['sem:' + lundi]; commit('ess', `Rappel des conseils de classe de la semaine du ${frDate(lundi)} remis`); };
 function ccVerifierRappel() {
-  try { const r = ccRappel(); if (r.L.length && !S.conseilsNotif['sem:' + r.lundi]) { S.conseilsNotif['sem:' + r.lundi] = new Date().toISOString(); save();
-    toast(`${r.L.length} conseil${r.L.length > 1 ? 's' : ''} de classe la semaine du ${frCourt(r.lundi)}`);
-    if ('Notification' in window && Notification.permission === 'granted') new Notification('Cockpit Coordo — conseils de classe de la semaine', { body: r.L.map(c => `${jourDe(c.date)} ${frDate(c.date).slice(0, 5)} ${heureTxt(c.heure)} · ${ccLib(c)}${c.salle ? ' · salle ' + c.salle : ''}`).join('\n') });
+  try { const r = ccRappel(); if ((r.L.length || r.D.length) && !S.conseilsNotif['sem:' + r.lundi]) { S.conseilsNotif['sem:' + r.lundi] = new Date().toISOString(); save();
+    toast([r.L.length ? `${r.L.length} conseil${r.L.length > 1 ? 's' : ''} de classe` : '', r.D.length ? `${r.D.length} date${r.D.length > 1 ? 's' : ''} de la cité` : ''].filter(Boolean).join(' et ') + ` la semaine du ${frCourt(r.lundi)}`);
+    if ('Notification' in window && Notification.permission === 'granted') new Notification('Cockpit Coordo — conseils de classe et dates de la semaine', { body: r.L.map(c => `${jourDe(c.date)} ${frDate(c.date).slice(0, 5)} ${heureTxt(c.heure)} · ${ccLib(c)}${c.salle ? ' · salle ' + c.salle : ''}`).concat(r.D.map(d => `${deQuand(d, true)} · ${d.titre}`)).join('\n') });
     majCompteurAlertes(); render(); } } catch (x) { }
   try { const auj = aujourdhui(), now = new Date(); const J = (S.conseils || []).filter(c => c.date === auj && ccMoment(c) >= now && !S.conseilsNotif['j0:' + c.id]).sort(ccTri); if (J.length) { J.forEach(c => { S.conseilsNotif['j0:' + c.id] = new Date().toISOString(); }); save();
     toast(`CONSEILS DE CLASSE AUJOURD'HUI : ${J.map(c => ccLib(c) + ' à ' + heureTxt(c.heure)).join(', ')}`);
@@ -295,9 +338,9 @@ function ccVerifierRappel() {
     majCompteurAlertes(); render(); } } catch (x) { }
 }
 function bandeauConseils() {
-  const r = ccRappel(); const p = $('#page'); if (!r.L.length || r.vu || !p || p.querySelector('.bandeau-cc') || /^#\/conseils/.test(location.hash)) return;
+  const r = ccRappel(); const p = $('#page'); if ((!r.L.length && !r.D.length) || r.vu || !p || p.querySelector('.bandeau-cc') || /^#\/conseils/.test(location.hash)) return;
   const auj = aujourdhui();
-  p.insertAdjacentHTML('afterbegin', `<div class="bandeau-cc no-print"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><b>Conseils de classe de la semaine du ${frCourt(r.lundi)}</b><span><a class="btn sm" href="#/conseils">Voir le planning</a> <button class="btn sm" onclick="ccVuSemaine('${r.lundi}')">Vu</button></span></div><ul>${r.L.map(c => `<li><span class="pill ${c.date === auj ? 'bad' : 'cc'}">${c.date === auj ? "aujourd'hui" : jourDe(c.date).slice(0, 3) + '. ' + frDate(c.date).slice(0, 5)}</span> <b>${heureTxt(c.heure)}</b> · <b>${esc(ccLib(c))}</b>${c.salle ? ' · salle ' + esc(c.salle) : ''}${c.preside ? ' <span class="muted">(' + esc(c.preside) + ')</span>' : ''}</li>`).join('')}</ul></div>`);
+  p.insertAdjacentHTML('afterbegin', `<div class="bandeau-cc no-print"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><b>${r.L.length ? 'Conseils de classe' + (r.D.length ? ' et dates' : '') : 'Dates de la cité'} de la semaine du ${frCourt(r.lundi)}</b><span><a class="btn sm" href="#/conseils">Voir le planning</a> <button class="btn sm" onclick="ccVuSemaine('${r.lundi}')">Vu</button></span></div><ul>${r.L.map(c => `<li><span class="pill ${c.date === auj ? 'bad' : 'cc'}">${c.date === auj ? "aujourd'hui" : jourDe(c.date).slice(0, 3) + '. ' + frDate(c.date).slice(0, 5)}</span> <b>${heureTxt(c.heure)}</b> · <b>${esc(ccLib(c))}</b>${c.salle ? ' · salle ' + esc(c.salle) : ''}${c.preside ? ' <span class="muted">(' + esc(c.preside) + ')</span>' : ''}</li>`).join('')}${r.D.map(d => `<li><span class="pill ${d.date <= auj && deFin(d) >= auj ? 'bad' : 'neutral'}">${d.date <= auj && deFin(d) >= auj && deFin(d) === d.date ? "aujourd'hui" : esc(deFin(d) !== d.date ? 'jusqu\'au ' + frDate(deFin(d)).slice(0, 5) : jourDe(d.date).slice(0, 3) + '. ' + frDate(d.date).slice(0, 5))}</span> ${deHeures(d) ? '<b>' + deHeures(d) + '</b> · ' : ''}<b>${esc(d.titre)}</b>${d.detail ? ' <span class="muted">' + esc(d.detail.length > 90 ? d.detail.slice(0, 88) + '…' : d.detail) + '</span>' : ''}</li>`).join('')}</ul></div>`);
 }
 window.editConseil = id => { const c0 = (S.conseils || []).find(x => x.id === id); const c = c0 || { date: '', heure: '17:00', classe: '', precision: '', salle: '', preside: '', periode: '' };
   modal(`<h2>${c0 ? 'Conseil de classe ' + esc(ccLib(c0)) : 'Ajouter un conseil de classe'}</h2>
@@ -314,6 +357,33 @@ window.editConseil = id => { const c0 = (S.conseils || []).find(x => x.id === id
       else { const n = { id: uid('cc'), ...v, manuel: true }; S.conseils.push(n); commit('ess', `Conseil de classe ${ccLib(n)} ajouté (${frDate(v.date)})`); }
       toast('Conseil de classe enregistré'); },
     c0 ? () => { S.conseils = S.conseils.filter(x => x.id !== id); commit('ess', `Conseil de classe ${ccLib(c0)} du ${frDate(c0.date)} supprimé`); } : null); };
+window.editDateEtab = id => { const d0 = (S.datesEtab || []).find(x => x.id === id); const d = d0 || { date: '', fin: '', heure: '', heureFin: '', titre: '', detail: '' };
+  modal(`<h2>${d0 ? esc(d0.titre) : 'Ajouter une date de la cité'}</h2>
+    <div class="grid g3" style="gap:10px"><label class="f">Date<input type="date" name="date" value="${esc(d.date)}" required></label>
+    <label class="f">Jusqu'au<input type="date" name="fin" value="${esc(d.fin || '')}"></label>
+    <label class="f">Titre<input type="text" name="titre" value="${esc(d.titre)}" placeholder="ex. Téléthon" required></label>
+    <label class="f">Heure de début<input type="time" name="heure" step="300" value="${esc(d.heure || '')}"></label>
+    <label class="f">Heure de fin<input type="time" name="heureFin" step="300" value="${esc(d.heureFin || '')}"></label></div>
+    <label class="f" style="margin-top:8px">Précisions<textarea name="detail" rows="3" placeholder="lieu, public, à savoir…">${esc(d.detail || '')}</textarea></label>`,
+    f => { if (!f.date || !(f.titre || '').trim()) { alert('Indique au moins la date et le titre.'); return false; }
+      if (f.fin && f.fin < f.date) { alert('La date de fin est avant la date de début.'); return false; }
+      const v = { date: f.date, fin: f.fin && f.fin > f.date ? f.fin : '', heure: f.heure || '', heureFin: f.heureFin || '', titre: f.titre.trim(), detail: (f.detail || '').trim() };
+      if (d0) { Object.assign(d0, v, { manuel: true }); commit('ess', `Date de la cité « ${v.titre} » modifiée (${frDate(v.date)})`); }
+      else { const n = { id: uid('de'), ...v, manuel: true }; S.datesEtab.push(n); commit('ess', `Date de la cité « ${n.titre} » ajoutée (${frDate(v.date)})`); }
+      toast('Date enregistrée'); },
+    d0 ? () => { S.datesEtab = S.datesEtab.filter(x => x.id !== id); commit('ess', `Date de la cité « ${d0.titre} » du ${frDate(d0.date)} supprimée`); } : null); };
+function deListe(toutes, auj, lundi) {
+  const finSem = (() => { const d = new Date(lundi + 'T12:00:00'); d.setDate(d.getDate() + 6); return isoLocal(d); })();
+  const mois = {}; toutes.forEach(d => { (mois[d.date.slice(0, 7)] ||= []).push(d); });
+  return Object.keys(mois).sort().map(m => { const L = mois[m], titre = new Date(m + '-15T12:00:00').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }), fini = L.every(d => deFin(d) < auj);
+    const corps = L.map(d => { const passee = deFin(d) < auj, enCours = d.date <= auj && deFin(d) >= auj, semaine = !passee && d.date <= finSem && deFin(d) >= lundi, j = new Date(d.date + 'T12:00:00');
+      return `<tbody class="cc-jour ${passee ? 'passee' : semaine ? 'semaine' : ''}"><tr class="ess-row" onclick="editDateEtab('${d.id}')" title="Cliquer pour modifier">
+        <td class="ess-date"><span class="ess-cal"><b>${j.getDate()}</b><small>${jourDe(d.date).slice(0, 3)}</small></span>${enCours ? '<div><span class="pill bad">' + (deFin(d) === d.date ? 'aujourd\'hui' : 'en cours') + '</span></div>' : semaine ? '<div><span class="pill ok">cette semaine</span></div>' : ''}</td>
+        <td class="small">${deFin(d) !== d.date ? `<b>du ${frCourt(d.date)} au ${frCourt(deFin(d))}</b>` : ''}${deHeures(d) ? `<b>${deHeures(d)}</b>` : deFin(d) !== d.date ? '' : '<span class="muted">journée</span>'}</td>
+        <td><b>${esc(d.titre)}</b>${d.detail ? `<div class="small muted">${esc(d.detail)}</div>` : ''}</td>
+        <td class="no-print" style="text-align:right"><button type="button" class="btn sm" onclick="event.stopPropagation();editDateEtab('${d.id}')">Modifier</button></td></tr></tbody>`; }).join('');
+    return `<div class="ess-mois ${fini ? 'fini' : ''}"><h3 class="ess-titre-mois cc">${titre.charAt(0).toUpperCase() + titre.slice(1)} <span class="pill ${fini ? 'neutral' : 'cc'}">${L.length} date${L.length > 1 ? 's' : ''}</span>${fini ? ' <span class="small muted">terminé</span>' : ''}</h3><table class="t compact ess-t cc-t"><thead><tr><th style="width:70px">Date</th><th>Heure</th><th>Événement</th><th class="no-print"></th></tr></thead>${corps}</table></div>`; }).join('');
+}
 let ccVue = null;
 window.ccSemaine = n => { ccVue = lundiSuivant(ccVue || ccLundiRappel(), n); render(); };
 window.ccAujourdhui = () => { ccVue = null; render(); };
@@ -335,7 +405,7 @@ function ccParMois(toutes, auj, lundi) {
     return `<div class="ess-mois ${fini ? 'fini' : ''}"><h3 class="ess-titre-mois cc${enCours ? ' en-cours' : ''}">${titre.charAt(0).toUpperCase() + titre.slice(1)} <span class="pill ${fini ? 'neutral' : 'cc'}">${L.length} conseil${L.length > 1 ? 's' : ''}</span>${fini ? ' <span class="small muted">terminé</span>' : ''}</h3><table class="t compact ess-t cc-t">${tete}${corps}</table></div>`; }).join('');
 }
 function pageConseils() {
-  setTitle('Conseils de classe', '<button class="btn" onclick="editConseil()">+ Ajouter un conseil</button>');
+  setTitle('Conseils de classe et dates', '<button class="btn" onclick="editConseil()">+ Ajouter un conseil</button> <button class="btn" onclick="editDateEtab()">+ Ajouter une date</button>');
   const auj = aujourdhui(), lundiR = ccLundiRappel(), lundi = ccVue || lundiR, now = new Date();
   const toutes = (S.conseils || []).slice().sort(ccTri), avenir = toutes.filter(c => ccMoment(c) >= now), sem = ccDeLaSemaine(lundi), r = ccRappel();
   const fin = new Date(lundi + 'T12:00:00'); fin.setDate(fin.getDate() + 6);
@@ -346,10 +416,15 @@ function pageConseils() {
     return `<div class="cc-carte ${j === auj ? 'auj' : passe ? 'passee' : ''}"><div class="cc-carte-h"><span class="ess-cal"><b>${d.getDate()}</b><small>${jourDe(j).slice(0, 3)}</small></span><b>${jourDe(j)} ${frCourt(j)}</b>${j === auj ? ' <span class="pill bad">aujourd\'hui</span>' : ''}</div>
       ${jours[j].map(c => `<div class="cc-ligne" onclick="editConseil('${c.id}')"><span class="cc-h">${heureTxt(c.heure)}</span><span class="grow"><b>${esc(c.classe)}</b>${c.precision ? ' <span class="muted">' + esc(c.precision) + '</span>' : ''}<div class="small muted">${c.salle ? 'salle <b style="color:var(--ink,inherit)">' + esc(c.salle) + '</b>' : 'salle ?'}${c.preside ? ' · ' + esc(c.preside) : ''}</div>${ccEleves(c).length ? `<div class="small" style="margin-top:2px">${ccElevesHtml(c)}</div>` : ''}</span></div>`).join('')}</div>`; }).join('');
   const notifOk = 'Notification' in window ? Notification.permission : 'indispo';
-  $('#page').innerHTML = `<div class="kpis" style="margin-bottom:14px">${kpi(avenir.length, 'conseils à venir')}${kpi(ccSemaineEnCours().length, 'cette semaine')}${kpi(ccDeLaSemaine(lundiSuivant(isoLocal(lundiDe(auj)), 1)).length, 'semaine suivante')}${kpi(toutes.length, 'au planning' + (periodes.length ? ' (' + esc(periodes.join(', ')) + ')' : ''))}</div>
+  const dates = (S.datesEtab || []).filter(d => d.date).slice().sort(deTri), datesAvenir = dates.filter(d => deFinMoment(d) >= now), semD = deDeLaSemaine(lundi);
+  const datesSem = semD.length ? `<div class="cc-dates-sem" style="margin-bottom:10px"><div class="small muted" style="margin-bottom:4px">Dates de la cité cette semaine-là</div><ul style="margin:0;padding-left:18px">${semD.map(d => `<li style="cursor:pointer" onclick="editDateEtab('${d.id}')"><b>${esc(d.titre)}</b> · ${esc(deQuand(d))}${d.detail ? ' <span class="small muted">' + esc(d.detail) + '</span>' : ''}</li>`).join('')}</ul></div>` : '';
+  $('#page').innerHTML = `<div class="kpis" style="margin-bottom:14px">${kpi(avenir.length, 'conseils à venir')}${kpi(datesAvenir.length, 'dates de la cité à venir')}${kpi(ccSemaineEnCours().length, 'cette semaine')}${kpi(ccDeLaSemaine(lundiSuivant(isoLocal(lundiDe(auj)), 1)).length, 'semaine suivante')}${kpi(toutes.length, 'au planning' + (periodes.length ? ' (' + esc(periodes.join(', ')) + ')' : ''))}</div>
   <div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h2 style="margin:0">Semaine du ${frCourt(lundi)} au ${frCourt(isoLocal(fin))}${lundi === lundiR ? ' <span class="pill ok">semaine du rappel</span>' : ''}</h2><span class="no-print"><button class="btn sm" onclick="ccSemaine(-1)">← précédente</button> <button class="btn sm" onclick="ccAujourdhui()">cette semaine</button> <button class="btn sm" onclick="ccSemaine(1)">suivante →</button></span></div>
-    <p class="small muted" style="margin:6px 0 10px">Chaque lundi, l'appli te rappelle les conseils de classe de la semaine (bandeau en haut de chaque page et notification du Mac si l'appli est ouverte ; le week-end, ceux de la semaine qui vient). Le jour même, un second rappel s'affiche. « Vu » retire le bandeau pour la semaine.${lundi === lundiR && r.L.length ? (r.vu ? ` <button class="btn sm ghost no-print" onclick="ccRevoirSemaine('${lundi}')">Remettre le bandeau</button>` : ` <button class="btn sm no-print" onclick="ccVuSemaine('${lundi}')">Vu</button>`) : ''}</p>
-    ${sem.length ? `<div class="cc-cartes">${cartesSem}</div>` : '<div class="empty">Aucun conseil de classe cette semaine-là.</div>'}</div>
+    <p class="small muted" style="margin:6px 0 10px">Chaque lundi, l'appli te rappelle les conseils de classe et les dates de la cité de la semaine (bandeau en haut de chaque page et notification du Mac si l'appli est ouverte ; le week-end, ceux de la semaine qui vient). Le jour même, un second rappel s'affiche. « Vu » retire le bandeau pour la semaine.${lundi === lundiR && r.L.length ? (r.vu ? ` <button class="btn sm ghost no-print" onclick="ccRevoirSemaine('${lundi}')">Remettre le bandeau</button>` : ` <button class="btn sm no-print" onclick="ccVuSemaine('${lundi}')">Vu</button>`) : ''}</p>
+    ${datesSem}${sem.length ? `<div class="cc-cartes">${cartesSem}</div>` : '<div class="empty">Aucun conseil de classe cette semaine-là.</div>'}</div>
+  <div class="card" style="margin-top:14px"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h2 style="margin:0">Dates de la cité scolaire <span class="small muted">${dates.length} date${dates.length > 1 ? 's' : ''}${dates.some(d => d.source) ? ' · ' + esc([...new Set(dates.map(d => d.source).filter(Boolean))].join(', ')) : ''}</span></h2><button class="btn sm no-print" onclick="editDateEtab()">+ Ajouter une date</button></div>
+    ${dates.length ? '<div style="margin-top:8px">' + deListe(dates, auj, isoLocal(lundiDe(auj))) + '</div>' : '<div class="empty">Aucune date enregistrée. Clique sur « + Ajouter une date » (sortie, CA, formation, remise des bulletins…).</div>'}
+    <p class="small muted" style="margin:8px 0 0">Ces dates s'affichent aussi dans le bandeau de la semaine et dans les Alertes. Un clic sur une ligne permet de la modifier ou de la supprimer.</p></div>
   <div class="card" style="margin-top:14px"><h2>Tous les conseils de classe <span class="small muted">${toutes.length} conseil${toutes.length > 1 ? 's' : ''}${toutes[0] && toutes[0].source ? ' · ' + esc(toutes[0].source) : ''}</span></h2>
     <div class="ess-legende small no-print"><span><i class="ess-l semaine"></i>cette semaine</span><span><i class="ess-l passee"></i>passé</span></div>
     ${toutes.length ? ccParMois(toutes, auj, isoLocal(lundiDe(auj))) : '<div class="empty">Aucun conseil de classe enregistré. Importe le planning dans « Données &amp; exports › Importer une mise à jour », ou clique sur « + Ajouter un conseil ».</div>'}
@@ -476,7 +551,7 @@ function load() {
         fresh.segmentsRempl = saved.segmentsRempl || fresh.segmentsRempl;
         fresh.prisesOcc = saved.prisesOcc || fresh.prisesOcc; fresh.prisesRetirees = saved.prisesRetirees || {};
         fresh.pubApercu = saved.pubApercu || false; fresh.serveur = saved.serveur || fresh.serveur; fresh.evals = saved.evals || fresh.evals; fresh.evalsVues = saved.evalsVues || fresh.evalsVues; if (saved.questions) { fresh.questions = saved.questions; fresh.questionsAjoutees = saved.questionsAjoutees; }
-        fresh.affConfirmees = saved.affConfirmees || fresh.affConfirmees; fresh.essVus = saved.essVus || fresh.essVus; fresh.prisesVues = saved.prisesVues || fresh.prisesVues; fresh.alertesAbs = saved.alertesAbs || fresh.alertesAbs; fresh.essRappels = saved.essRappels || fresh.essRappels; fresh.essNotif = saved.essNotif || fresh.essNotif; fresh.conseils = saved.conseils || fresh.conseils; fresh.conseilsVus = saved.conseilsVus || fresh.conseilsVus; fresh.conseilsNotif = saved.conseilsNotif || fresh.conseilsNotif; // rappels d'ESS déjà envoyés
+        fresh.affConfirmees = saved.affConfirmees || fresh.affConfirmees; fresh.essVus = saved.essVus || fresh.essVus; fresh.prisesVues = saved.prisesVues || fresh.prisesVues; fresh.alertesAbs = saved.alertesAbs || fresh.alertesAbs; fresh.essRappels = saved.essRappels || fresh.essRappels; fresh.essNotif = saved.essNotif || fresh.essNotif; fresh.conseils = saved.conseils || fresh.conseils; fresh.datesEtab = saved.datesEtab || fresh.datesEtab; fresh.conseilsVus = saved.conseilsVus || fresh.conseilsVus; fresh.conseilsNotif = saved.conseilsNotif || fresh.conseilsNotif; // rappels d'ESS déjà envoyés
         fresh.absences = saved.absences || fresh.absences; // historique des absences : saisie de l'appli, conservée
         // saisies faites dans l'appli (calendrier, règles de l'équipe, souhaits, dispositif et compteur d'heures supplémentaires des AESH) : conservées
         if (saved.calendrier) fresh.calendrier = saved.calendrier;
@@ -543,7 +618,8 @@ function migrate(s) {
   s.questionsAjoutees = s.questionsAjoutees || ['q1'];
   QUESTIONS_INITIALES.forEach(q => { if (!s.questionsAjoutees.includes(q.id) && !s.questions.some(x => x.id === q.id)) { s.questions.push({ ...q }); } if (!s.questionsAjoutees.includes(q.id)) s.questionsAjoutees.push(q.id); });
   s.essVus = s.essVus || {}; s.prisesVues = s.prisesVues || null; s.alertesAbs = s.alertesAbs || []; if (!s.alertesInit) { s.alertesInit = true; const lim = new Date(Date.now() - 7 * 864e5).toISOString(); (s.journal || []).filter(j => j.date >= lim && / réintégrée automatiquement \(fin de /.test(j.texte || '')).forEach(j => { const a = (s.aesh || []).find(x => j.texte.startsWith(x.nom + ' réintégrée')); const m = j.texte.match(/fin de (.+?) le (\d\d)\/(\d\d)\/(\d{4})/), n = (j.texte.match(/archivés : (\d+)/) || [])[1]; if (a && m && !s.alertesAbs.some(x => x.id === 'retour-' + a.id + '-' + m[4] + '-' + m[3] + '-' + m[2])) s.alertesAbs.push({ id: 'retour-' + a.id + '-' + m[4] + '-' + m[3] + '-' + m[2], type: 'retour', le: j.date, vu: false, aeshId: a.id, fin: m[4] + '-' + m[3] + '-' + m[2], motif: m[1], n: n ? +n : 0 }); }); } s.essRappels = s.essRappels || {}; s.essNotif = s.essNotif || {};
-  s.conseils = s.conseils || []; s.conseilsVus = s.conseilsVus || {}; s.conseilsNotif = s.conseilsNotif || {};
+  s.conseils = s.conseils || []; s.conseilsVus = s.conseilsVus || {}; s.conseilsNotif = s.conseilsNotif || {}; s.datesEtab = s.datesEtab || [];
+  if (!s.actuCite8) { s.actuCite8 = true; appliquerActuCite8(s); } // 22/11 : conseils du 1er trimestre (heures, salles) et dates de la cité, d'après l'Actu cité n° 8
   s.segmentsRempl = s.segmentsRempl || [];
   // historique des absences : une seule fiche par absence (aucun doublon quand les données de référence sont rechargées)
   s.aesh.forEach(a => { a.statut = motifNormalise(a.statut); }); s.absences.forEach(x => { x.motif = motifNormalise(x.motif); });
@@ -794,7 +870,7 @@ function alertes() {
   S.affectations.filter(a => a.aConfirmer).forEach(a => { const e = eleve(a.eleveId), x = aesh(a.aeshId); if (e && x && isActive(e)) add('warn', 'Affectation', `Répartition à confirmer : ${e.nom} ${e.prenom} ↔ ${x.nom} (${hf(a.heures)})`, '#/affectation'); });
   S.affectations.forEach(a => { const e = eleve(a.eleveId), x = aesh(a.aeshId); const dp = e && x && isActive(e) ? horsDispositif(x, e) : null; if (dp) add('bad', 'Affectation', `${e.nom} ${e.prenom} est en ${dp} : seules les AESH ${dp} interviennent (${x.nom} n'en fait pas partie)`, '#/eleves/' + e.id); });
   try { const d = essDus(); if (d.n) add('warn', 'AESH', `ESS de la semaine du ${frCourt(d.c.lundi)} : ${d.n} AESH à prévenir (${d.msgs.map(m => m.a.nom.split(' ')[0]).join(', ')}) — messages prêts dans l'onglet ESS`, '#/ess'); const sem = essSemaineEnCours(); if (sem.length) add('warn', 'Élèves', `${sem.length} ESS cette semaine : ${sem.map(e => `${e.nom} ${e.prenom} (${jourDe(e.essDate).slice(0, 3)}. ${frDate(e.essDate).slice(0, 5)}${e.essHeure ? ' ' + heureTxt(e.essHeure) : ''})`).join(', ')}`, '#/ess'); } catch (x) { }
-  try { const r = ccRappel(); if (r.L.length) add('warn', 'Élèves', `${r.L.length} conseil${r.L.length > 1 ? 's' : ''} de classe la semaine du ${frCourt(r.lundi)} : ${r.L.map(c => `${ccLib(c)} (${jourDe(c.date).slice(0, 3)}. ${frDate(c.date).slice(0, 5)} ${heureTxt(c.heure)}${c.salle ? ', salle ' + c.salle : ''})`).join(', ')}`, '#/conseils'); } catch (x) { }
+  try { const r = ccRappel(); if (r.D.length) add('warn', 'Élèves', `${r.D.length} date${r.D.length > 1 ? 's' : ''} de la cité la semaine du ${frCourt(r.lundi)} : ${r.D.map(d => `${d.titre} (${deQuand(d, true)})`).join(', ')}`, '#/conseils'); if (r.L.length) add('warn', 'Élèves', `${r.L.length} conseil${r.L.length > 1 ? 's' : ''} de classe la semaine du ${frCourt(r.lundi)} : ${r.L.map(c => `${ccLib(c)} (${jourDe(c.date).slice(0, 3)}. ${frDate(c.date).slice(0, 5)} ${heureTxt(c.heure)}${c.salle ? ', salle ' + c.salle : ''})`).join(', ')}`, '#/conseils'); } catch (x) { }
   const manq = S.aesh.filter(a => a.quotite == null).length; if (manq) out.unshift({ k: 'warn', cat: 'AESH', t: `${manq} AESH sans quotité renseignée — le volume d'heures restant disponible n'est pas calculable`, h: '#/aesh' });
   chevauchements().forEach(x => { if (x.type !== 'aesh') return; const a = aesh(x.id); if (a) add('bad', 'AESH', `${a.nom} est à deux endroits le ${JOURS_LONGS[x.a.jour - 1]} (${x.a.debut}-${x.a.fin} / ${x.b.debut}-${x.b.fin})`, '#/aesh/' + a.id); });
   // signalements liés aux souhaits et aux règles de l'équipe (ils ne bloquent jamais)
