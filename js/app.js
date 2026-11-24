@@ -621,6 +621,11 @@ function migrate(s) {
     for (const [re, mail] of [[/\bLACROIX\b/i, 'Clacroix13@ac-lyon.fr'], [/\bBEN[\s-]*SAADI\b/i, 'Farida.Ben-Saadi@ac-lyon.fr']]) { const L = s.aesh.filter(a => re.test(a.nom || '')); if (L.length === 1) L[0].email = mail; }
   }
   if (!s.nomHeritier2211) { s.nomHeritier2211 = true; renommerHeritier(s); } // 22/11 : Nadia BEN KAA KAA (AESH SEGPA) s'appelle maintenant Nadia HÉRITIER
+  // 24/11 : nouvelle AESH demandée par Hanan, Narya ALI, 26 h, arrive le 03/12/2026, sans élève pour l'instant. Ajoutée une seule fois (drapeau aeshAli2411),
+  // identifiant et couleur fixes : deux appareils qui l'ajoutent obtiennent la même fiche (pas de doublon à la synchro). Rien n'est ajouté si une fiche Narya ALI existe déjà.
+  if (!s.aeshAli2411) { s.aeshAli2411 = true;
+    if (!s.aesh.some(a => /\bnarya\b/i.test(a.nom || '') && /\bali\b/i.test(a.nom || ''))) s.aesh.push({ id: 'a-ali-narya', nom: 'Narya ALI', site: 'Collège', quotite: 26, statut: 'Actif', absenceDebut: null, absenceFin: null, heuresAutres: null, heuresCoordo: null, longueDuree: false, dispositif: '', email: '', couleur: '#1F7A8C', remarques: "Arrivée dans l'équipe le 03/12/2026.", hs: { autorise: 0, depuis: '', mouvements: [] } });
+  }
   s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
   s.questions = s.questions || [];
   // questions ajoutées par Claude : chaque question n'est ajoutée qu'une fois (suivi dans questionsAjoutees), ce que Cécile supprime ou coche n'est pas recréé
