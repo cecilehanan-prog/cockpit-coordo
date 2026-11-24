@@ -2446,8 +2446,8 @@ function appliquerEdtAesh(f) {
   d.eleves.forEach((x, i) => { const e = eleve(f['fe' + i]); if (!e) return; const ch = [];
     Object.entries(x.champs || {}).forEach(([k, v]) => { if (!f['fc' + i + '_' + k]) return; const old = e[k]; if (String(old ?? '') === String(v ?? '')) return; e[k] = v; if (CHAMPS_DOSSIER.includes(k)) { (e.manuel = e.manuel || {})[k] = true; if (e.auto) delete e.auto[k]; } if (k === 'statut') e.statutManuel = true; ch.push(`${k} ${old ?? '—'} → ${v ?? '—'}`); });
     if (ch.length && x.champs && x.champs.notifFin && !x.champs.statut && e.statutManuel && isPending(e)) e.statutManuel = false;
-    if (Array.isArray(x.suivis) && f['fs' + i]) ch.push(...fusionSuivis(e, x.suivis));
-    if (ch.length) { log('eleve', `${e.nom} ${e.prenom} : ${ch.join(', ')} (mise à jour préparée)`); resume.push(`${e.nom} ${e.prenom} : ${ch.length} champ${ch.length > 1 ? 's' : ''} mis à jour`); } });
+    const chS = Array.isArray(x.suivis) && f['fs' + i] ? fusionSuivis(e, x.suivis) : [];
+    if (ch.length || chS.length) { log('eleve', `${e.nom} ${e.prenom} : ${ch.concat(chS.map(t => 'suivi ' + t)).join(', ')} (mise à jour préparée)`); resume.push(`${e.nom} ${e.prenom} : ${[ch.length ? `${ch.length} champ${ch.length > 1 ? 's' : ''} mis à jour` : '', chS.length ? `${chS.length} suivi${chS.length > 1 ? 's' : ''} médica${chS.length > 1 ? 'ux' : 'l'} ajouté${chS.length > 1 ? 's' : ''} ou complété${chS.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(', ')}`); } });
   if (d.eleves.length) appliquerStatuts();
   if (Array.isArray(d.conseils) && d.conseils.length) { S.conseils = (S.conseils || []).filter(c => c.periode !== d.periode).concat(d.conseils.map(c => ({ id: c.id || uid('cc'), date: c.date, heure: c.heure || '', classe: c.classe || '', precision: c.precision || '', salle: c.salle || '', preside: c.preside || '', periode: d.periode || c.periode || '', source: d.source || '' }))); resume.push(`${d.conseils.length} conseil${d.conseils.length > 1 ? 's' : ''} de classe enregistré${d.conseils.length > 1 ? 's' : ''}${d.periode ? ' (' + d.periode + ')' : ''}`); }
   EDT_IMPORT = null;
