@@ -517,6 +517,34 @@ function carteProfil(e) {
     <div><b class="small">Aides et aménagements</b>${ad ? `<ul style="margin:6px 0 0;padding-left:18px">${ad}</ul>` : '<div class="muted small" style="margin-top:6px">Aucune aide relevée.</div>'}</div></div>
     <p class="small muted" style="margin:10px 0 0">Mentions relevées automatiquement dans les documents de l'élève (GEVASCO, PPS, MOPPS, notifications MDPH, PAI, PAP…) — ${nbDocs} document${nbDocs > 1 ? 's' : ''} lu${nbDocs > 1 ? 's' : ''}${pr.maj ? ', mise à jour du ' + new Date(pr.maj).toLocaleDateString('fr-FR') : ''}. Ce ne sont pas des diagnostics : survole une mention pour voir le document source. Les mentions saisies à la main sont conservées.</p></div>`;
 }
+/* ---- Suivis médicaux et paramédicaux (orthophonie, ergothérapie, psychologue, CMP, SESSAD…) ----
+   e.suivis = [{ nom, detail, source, manuel }] : relevés dans les PPS / GEVASCO / MOPPS (fichier « Importer une mise à jour »)
+   ou saisis à la main. Un import ajoute ou complète, il ne supprime jamais un suivi. */
+function carteSuivis(e) {
+  const L = e.suivis || [];
+  const li = L.map(s => `<li><b>${esc(s.nom)}</b>${s.detail ? ' — ' + esc(s.detail) : ''}${s.source ? ` <span class="small muted">(${esc(s.source)})</span>` : s.manuel ? ' <span class="small muted">(saisi)</span>' : ''}</li>`).join('');
+  return `<div class="card" style="margin-top:14px"><h2>Suivis médicaux et paramédicaux <button class="btn sm no-print" style="float:right" onclick="editSuivis('${e.id}')">Modifier</button></h2>
+    ${li ? `<ul style="margin:6px 0 0;padding-left:18px">${li}</ul>` : '<div class="muted small">Aucun suivi noté.</div>'}
+    <p class="small muted" style="margin:10px 0 0">Suivis écrits dans les PPS, GEVASCO et MOPPS (document entre parenthèses), ou saisis à la main.</p></div>`;
+}
+window.editSuivis = id => {
+  const e = eleve(id), L = e.suivis || [];
+  modal(`<h2>Suivis médicaux et paramédicaux — ${esc(e.prenom)} ${esc(e.nom)}</h2><div class="form-grid">
+    <label class="f wide">Un suivi par ligne, sous la forme « Orthophonie — en libéral, 1 fois par semaine »<textarea name="suivis" rows="8">${esc(L.map(s => s.nom + (s.detail ? ' — ' + s.detail : '')).join('\n'))}</textarea></label></div>
+    <p class="small muted">Le document source d'un suivi relevé est gardé tant que tu ne changes pas sa ligne.</p>`, d => {
+    const lignes = [...new Set(String(d.suivis || '').split('\n').map(x => x.trim()).filter(Boolean))];
+    e.suivis = lignes.map(l => { const m = l.split(/\s+[—–-]\s+/); const nom = m.shift().trim(), detail = m.join(' — ').trim(); const a = L.find(s => s.nom === nom && (s.detail || '') === detail); return a ? a : { nom, detail, manuel: true }; });
+    commit('eleve', `${e.nom} ${e.prenom} : suivis médicaux modifiés`);
+  });
+};
+// Fusion d'un import : ajoute les suivis absents, complète le détail / la source d'un suivi de même nom ; ne supprime rien.
+const nomSuivi = n => nrmNom(n);
+function fusionSuivis(e, L) { e.suivis = e.suivis || []; const ch = [];
+  (L || []).forEach(s => { if (!s || !s.nom) return; const ex = e.suivis.find(x => nomSuivi(x.nom) === nomSuivi(s.nom));
+    if (!ex) { e.suivis.push({ nom: s.nom, detail: s.detail || '', source: s.source || '' }); ch.push('+ ' + s.nom); return; }
+    if (s.detail && !ex.detail) { ex.detail = s.detail; ch.push(s.nom + ' complété'); }
+    if (s.source && !ex.source) { ex.source = s.source; if (!ch.includes(s.nom + ' complété')) ch.push(s.nom + ' : source ajoutée'); } });
+  return ch; }
 window.editProfil = id => {
   const e = eleve(id), pr = e.profil = e.profil || { troubles: [], aides: [], masques: { troubles: [], aides: [] } }, D = ((window.DOSSIERS_DONNEES && window.DOSSIERS_DONNEES.eleves) || {})[cleEleve(e)] || { troubles: [], aides: [] };
   modal(`<h2>Troubles et aides — ${esc(e.prenom)} ${esc(e.nom)}</h2><div class="form-grid">
@@ -558,7 +586,7 @@ function load() {
         if (saved.regles) fresh.regles = saved.regles;
         (saved.aesh || []).forEach(sa => { const fa = fresh.aesh.find(x => x.id === sa.id); if (fa) ['statut', 'absenceDebut', 'absenceFin'].forEach(k => { if (sa[k] !== undefined) fa[k] = sa[k]; }); /* l'état d'absence appartient à l'appli (saisi par Cécile) : jamais réimposé par les données de référence */ if (fa && sa.souhaits) fa.souhaits = sa.souhaits; if (fa && sa.dispositif !== undefined) fa.dispositif = sa.dispositif; if (fa && sa.hs) fa.hs = (fa.hs && (fa.hs.rev || 0) > (sa.hs.rev || 0)) ? { ...sa.hs, autorise: fa.hs.autorise, depuis: fa.hs.depuis, rev: fa.hs.rev } : sa.hs; /* réglage du dépassement renouvelé dans les données (rev plus récente) : on le reprend, mais on garde les mouvements saisis */ });
         (saved.eleves || []).forEach(se => { const fe = fresh.eleves.find(x => x.id === se.id); if (!fe) return;
-          ['manuel', 'auto', 'profil', 'statutManuel'].forEach(k => { if (se[k] !== undefined) fe[k] = se[k]; });
+          ['manuel', 'auto', 'profil', 'statutManuel', 'suivis'].forEach(k => { if (se[k] !== undefined) fe[k] = se[k]; });
           Object.keys(se.manuel || {}).forEach(c => { fe[c] = se[c]; }); if (se.statutManuel) fe.statut = se.statut; });
         S = migrate(fresh);
         window.__dataJustRefreshed = true;
@@ -1840,7 +1868,7 @@ function ficheEleve(id) {
     return `<div class="card" style="margin-top:14px"><h2>Aménagements PPS retenus <span class="small muted">niveau ${e.niveau} · ${sum.reduce((s, x) => s + x.items.length, 0)} items</span> <a class="btn sm no-print" style="float:right" href="#/pps/${id}">Modifier</a></h2>
     ${m && m.aeshType ? `<p class="small" style="margin:0 0 8px"><b>Aide humaine :</b> ${esc(m.aeshType)}${m.aeshHeures ? ' · ' + esc(m.aeshHeures) + ' h' : ''}${m.aeshPct ? ' · ' + esc(m.aeshPct) + ' %' : ''}${m.aeshActivites.length ? ' · ' + m.aeshActivites.length + ' activités prescrites' : ''}</p>` : ''}
     <div class="pps-sum">${sum.map(s => `<div><h3>${esc(s.titre)}</h3><ul>${s.items.map(i => `<li>${esc(i)}</li>`).join('')}${s.autre ? `<li><i>${esc(s.autre)}</i></li>` : ''}</ul></div>`).join('')}</div></div>`; })()}
-  ${carteDecisions(e)}${carteProfil(e)}${carteDocuments(e)}
+  ${carteDecisions(e)}${carteProfil(e)}${carteSuivis(e)}${carteDocuments(e)}
   <div class="grid g2" style="margin-top:14px">
    <div class="card"><h2>Emploi du temps d'accompagnement <button class="btn sm no-print" style="float:right" onclick="editCreneau(null,{eleveId:'${id}',aeshId:'${affs[0]?.aeshId || ''}'})">+ Créneau</button></h2>${(() => { const cf = chevauchements().filter(x => x.type === 'eleve' && x.id === id); const cfIds = new Set(cf.flatMap(x => [x.a.id, x.b.id]));
     return (cf.length ? `<div class="small" style="color:var(--bad);margin-bottom:6px">⚠ ${cf.length} chevauchement${cf.length > 1 ? 's' : ''} d'horaires (deux AESH prévues en même temps).</div>` : '') + (bl.length ? weekGrid(bl, true, 'editCreneau', cfIds) : '<div class="empty">Aucun créneau planifié.</div>'); })()}
@@ -2377,7 +2405,7 @@ window.importEdtAesh = file => { if (!file) return; const r = new FileReader(); 
   const valTxt = (k, v) => v == null || v === '' ? '—' : /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? frDate(v) : k === 'heures' ? hf(v) : esc(v);
   const blocsE = d.eleves.length ? `<div class="card" style="margin:10px 0"><h3 style="margin:0 0 6px">Fiches élèves</h3><table class="t compact"><thead><tr><th>Dans le fichier</th><th>Élève dans le cockpit</th><th>Changements</th></tr></thead><tbody>${d.eleves.map((x, i) => { const ce = trouverEleve(x.eleve, x.classe); const e0 = ce.length === 1 ? ce[0] : null;
       const nv = x.nouveau && !ce.length;
-      return `<tr><td><b>${esc(x.eleve)}</b>${x.note ? `<div class="small muted">${esc(x.note)}</div>` : ''}</td><td><select name="fe${i}">${x.nouveau ? `<option value="__nouveau" ${nv ? 'selected' : ''}>➕ Créer la fiche (${esc(x.nouveau.classe || '')})</option>` : ''}${optE(e0 && !nv ? e0.id : '').replace(nv ? ' selected' : '\u0000', '')}</select>${e0 || nv ? '' : `<div class="small" style="color:var(--warn)">${ce.length ? 'plusieurs élèves possibles' : 'élève non trouvé'} : choisis-le</div>`}${nv ? '<div class="small muted">nouvel élève : la fiche sera créée</div>' : ''}</td><td class="small">${Object.entries(x.champs || {}).map(([k, v]) => `<label style="display:block"><input type="checkbox" name="fc${i}_${k}" checked> ${esc(LIB_CHAMPS[k] || k)} : ${e0 ? valTxt(k, e0[k]) + ' → ' : ''}<b>${valTxt(k, v)}</b></label>`).join('')}</td></tr>`; }).join('')}</tbody></table></div>` : '';
+      return `<tr><td><b>${esc(x.eleve)}</b>${x.note ? `<div class="small muted">${esc(x.note)}</div>` : ''}</td><td><select name="fe${i}">${x.nouveau ? `<option value="__nouveau" ${nv ? 'selected' : ''}>➕ Créer la fiche (${esc(x.nouveau.classe || '')})</option>` : ''}${optE(e0 && !nv ? e0.id : '').replace(nv ? ' selected' : '\u0000', '')}</select>${e0 || nv ? '' : `<div class="small" style="color:var(--warn)">${ce.length ? 'plusieurs élèves possibles' : 'élève non trouvé'} : choisis-le</div>`}${nv ? '<div class="small muted">nouvel élève : la fiche sera créée</div>' : ''}</td><td class="small">${Object.entries(x.champs || {}).map(([k, v]) => `<label style="display:block"><input type="checkbox" name="fc${i}_${k}" checked> ${esc(LIB_CHAMPS[k] || k)} : ${e0 ? valTxt(k, e0[k]) + ' → ' : ''}<b>${valTxt(k, v)}</b></label>`).join('')}${Array.isArray(x.suivis) && x.suivis.length ? `<label style="display:block"><input type="checkbox" name="fs${i}" checked> Suivis médicaux : ${x.suivis.map(su => { const deja = e0 && (e0.suivis || []).some(y => nrmNom(y.nom) === nrmNom(su.nom)); return `<b>${esc(su.nom)}</b>${su.detail ? ' (' + esc(su.detail) + ')' : ''}${deja ? ' <span class="muted">déjà noté</span>' : ''}`; }).join(', ')}</label>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '';
   const blocsC = Array.isArray(d.conseils) && d.conseils.length ? (() => { const exist = (S.conseils || []).filter(c => c.periode === d.periode); return `<div class="card" style="margin:10px 0"><h3 style="margin:0 0 6px">Conseils de classe${d.periode ? ' · ' + esc(d.periode) : ''} <span class="small muted">${d.conseils.length} conseil${d.conseils.length > 1 ? 's' : ''}</span></h3>${exist.length ? `<p class="small" style="margin:0 0 6px;color:var(--warn)">Les ${exist.length} conseils déjà enregistrés pour cette période sont remplacés par ceux du fichier.</p>` : ''}<table class="t compact"><thead><tr><th>Date</th><th>Heure</th><th>Classe</th><th>Salle</th><th>Présidé par</th></tr></thead><tbody>${d.conseils.slice().sort(ccTri).map(c => `<tr><td>${jourDe(c.date)} ${frDate(c.date)}</td><td>${heureTxt(c.heure)}</td><td><b>${esc(c.classe)}</b> ${esc(c.precision || '')}</td><td>${esc(c.salle || '')}</td><td>${esc(c.preside || '')}</td></tr>`).join('')}</tbody></table></div>`; })() : '';
   const blocsAf = d.affectations.length ? `<div class="card" style="margin:10px 0"><h3 style="margin:0 0 6px">AESH à ajouter</h3><p class="small muted" style="margin:0 0 6px">L'AESH est ajoutée à l'élève avec ces heures ; ses créneaux d'EDT ne changent pas.</p><table class="t compact"><thead><tr><th>Élève</th><th>AESH dans le cockpit</th><th class="num">Heures</th></tr></thead><tbody>${d.affectations.map((x, i) => { const ca = trouverAesh(x.aesh); const dansFichier = d.eleves.findIndex(y => y.eleve === x.eleve); const ce = dansFichier >= 0 ? [] : trouverEleve(x.eleve, x.classe);
       return `<tr><td><b>${esc(x.eleve)}</b> <span class="muted small">${esc(x.classe || '')}</span>${dansFichier >= 0 ? '<div class="small muted">élève de la liste ci-dessus</div>' : `<div><select name="ae${i}">${optE(ce.length === 1 ? ce[0].id : '')}</select></div>`}</td><td><select name="aa${i}">${optA(ca.length === 1 ? ca[0].id : '')}</select>${ca.length === 1 ? '' : '<div class="small" style="color:var(--warn)">choisis l\'AESH</div>'}</td><td class="num">${hf(+x.heures || 0)}</td></tr>`; }).join('')}</tbody></table></div>` : '';
@@ -2418,6 +2446,7 @@ function appliquerEdtAesh(f) {
   d.eleves.forEach((x, i) => { const e = eleve(f['fe' + i]); if (!e) return; const ch = [];
     Object.entries(x.champs || {}).forEach(([k, v]) => { if (!f['fc' + i + '_' + k]) return; const old = e[k]; if (String(old ?? '') === String(v ?? '')) return; e[k] = v; if (CHAMPS_DOSSIER.includes(k)) { (e.manuel = e.manuel || {})[k] = true; if (e.auto) delete e.auto[k]; } if (k === 'statut') e.statutManuel = true; ch.push(`${k} ${old ?? '—'} → ${v ?? '—'}`); });
     if (ch.length && x.champs && x.champs.notifFin && !x.champs.statut && e.statutManuel && isPending(e)) e.statutManuel = false;
+    if (Array.isArray(x.suivis) && f['fs' + i]) ch.push(...fusionSuivis(e, x.suivis));
     if (ch.length) { log('eleve', `${e.nom} ${e.prenom} : ${ch.join(', ')} (mise à jour préparée)`); resume.push(`${e.nom} ${e.prenom} : ${ch.length} champ${ch.length > 1 ? 's' : ''} mis à jour`); } });
   if (d.eleves.length) appliquerStatuts();
   if (Array.isArray(d.conseils) && d.conseils.length) { S.conseils = (S.conseils || []).filter(c => c.periode !== d.periode).concat(d.conseils.map(c => ({ id: c.id || uid('cc'), date: c.date, heure: c.heure || '', classe: c.classe || '', precision: c.precision || '', salle: c.salle || '', preside: c.preside || '', periode: d.periode || c.periode || '', source: d.source || '' }))); resume.push(`${d.conseils.length} conseil${d.conseils.length > 1 ? 's' : ''} de classe enregistré${d.conseils.length > 1 ? 's' : ''}${d.periode ? ' (' + d.periode + ')' : ''}`); }
