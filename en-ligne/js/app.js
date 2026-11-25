@@ -652,8 +652,10 @@ function migrate(s) {
   // 24/11 : nouvelle AESH demandée par Hanan, Narya ALI, 26 h, arrive le 03/12/2026, sans élève pour l'instant. Ajoutée une seule fois (drapeau aeshAli2411),
   // identifiant et couleur fixes : deux appareils qui l'ajoutent obtiennent la même fiche (pas de doublon à la synchro). Rien n'est ajouté si une fiche Narya ALI existe déjà.
   if (!s.aeshAli2411) { s.aeshAli2411 = true;
-    if (!s.aesh.some(a => /\bnarya\b/i.test(a.nom || '') && /\bali\b/i.test(a.nom || ''))) s.aesh.push({ id: 'a-ali-narya', nom: 'Narya ALI', site: 'Collège', quotite: 26, statut: 'Actif', absenceDebut: null, absenceFin: null, heuresAutres: null, heuresCoordo: null, longueDuree: false, dispositif: '', email: '', couleur: '#1F7A8C', remarques: "Arrivée dans l'équipe le 03/12/2026.", hs: { autorise: 0, depuis: '', mouvements: [] } });
+    if (!s.aesh.some(a => /\bnarya\b/i.test(a.nom || '') && /\bali\b/i.test(a.nom || ''))) s.aesh.push({ id: 'a-ali-narya', nom: 'Narya ALI', site: 'Collège', quotite: 26, statut: 'Actif', absenceDebut: null, absenceFin: null, heuresAutres: null, heuresCoordo: null, longueDuree: false, dispositif: '', email: '', couleur: '#C2477D', remarques: "Arrivée dans l'équipe le 03/12/2026.", hs: { autorise: 0, depuis: '', mouvements: [] } });
   }
+  // 25/11 : Narya ALI est en voie ordinaire, sa fiche doit être rose comme le reste de l'équipe en ordinaire (elle avait été créée en bleu). Une seule fois (drapeau couleurAli2511).
+  if (!s.couleurAli2511) { s.couleurAli2511 = true; s.aesh.forEach(a => { if (/\bnarya\b/i.test(a.nom || '') && /\bali\b/i.test(a.nom || '') && String(a.couleur || '').toUpperCase() === '#1F7A8C') a.couleur = '#C2477D'; }); }
   s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
   s.questions = s.questions || [];
   // questions ajoutées par Claude : chaque question n'est ajoutée qu'une fois (suivi dans questionsAjoutees), ce que Cécile supprime ou coche n'est pas recréé
