@@ -15,7 +15,7 @@ const motifNormalise = m => m === 'Arrêt de travail' ? 'Arrêt maladie' : m ===
 function synchroDispositifs() {
   let n = 0;
   DISPOSITIFS.forEach(D => {
-    const ids = S.aesh.filter(a => a.dispositif === D).map(a => a.id); if (!ids.length) return;
+    const ids = equipe().filter(a => a.dispositif === D).map(a => a.id); if (!ids.length) return;
     S.eleves.filter(e => isActive(e) && dispositifDe(e) === D).forEach(e => {
       const hors = S.affectations.filter(x => x.eleveId === e.id && !ids.includes(x.aeshId));
       const manque = ids.filter(id => !S.affectations.some(x => x.eleveId === e.id && x.aeshId === id));
@@ -35,6 +35,12 @@ const classeHtml = e => esc(e.classe) + (libDisp(e) ? ` <span class="pill warn">
 const horsDispositif = (a, e) => { const d = dispositifDe(e); return d && a.dispositif !== d ? d : null; };
 const absente = a => !!a.statut && a.statut !== 'Actif';
 const aujourdhui = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+/* 26/11 : sortie d'une AESH de l'équipe (démission, mutation, fin de contrat) : champ dateSortie (AAAA-MM-JJ) dans sa fiche.
+   À partir de cette date, elle disparaît des effectifs (compteur du menu, Synthèse, listes, EDT, remplacements, mails, appli en ligne),
+   mais sa fiche, son journal, ses absences et ses archives sont gardés : equipe() pour l'équipe actuelle, S.aesh pour tout l'historique. */
+const sortieAesh = a => !!(a && a.dateSortie) && aujourdhui() >= a.dateSortie;
+const equipe = () => (S.aesh || []).filter(a => !sortieAesh(a));
+const pillSortie = a => !a || !a.dateSortie ? '' : ` <span class="pill ${sortieAesh(a) ? 'neutral' : 'warn'}">${sortieAesh(a) ? 'Sortie de l\u2019équipe le' : 'Quitte l\u2019équipe le'} ${a.dateSortie.slice(8, 10)}/${a.dateSortie.slice(5, 7)}/${a.dateSortie.slice(0, 4)}</span>`;
 const KANBAN = ['Vigilance (sans dossier)', 'Dossier à monter', 'Dossier 1ère demande déposé AESHi', 'Dossier 1ère demande déposé AESHm', 'Dossier renouvellement déposé AESHi', 'Dossier renouvellement déposé AESHm'];
 const JOURS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven'];
 const H0 = 8, H1 = 18; // planning 8h → 18h
@@ -470,7 +476,7 @@ async function chargerDossiers() {
     if (window.cockpitFS) { docs = await window.cockpitFS.listDocuments(); edt = await window.cockpitFS.listEdt(); source = 'dossier'; maj = new Date().toISOString(); }
     else if (window.DOSSIERS_INDEX) { docs = window.DOSSIERS_INDEX.docs || []; edt = window.DOSSIERS_INDEX.edt || []; maj = window.DOSSIERS_INDEX.genere || ''; }
   } catch (e) { console.warn('Dossiers illisibles', e); }
-  const rapDocs = DOCS_LIB().rapprocher(docs, S.eleves), rapEdt = DOCS_LIB().rapprocherEdt(edt, S.aesh);
+  const rapDocs = DOCS_LIB().rapprocher(docs, S.eleves), rapEdt = DOCS_LIB().rapprocherEdt(edt, equipe());
   const tous = []; Object.values(rapDocs.parEleve).forEach(l => l.forEach(f => { f.i = tous.length; tous.push(f); })); rapDocs.aClasser.forEach(a => { a.fichier.i = tous.length; tous.push(a.fichier); });
   DOSS = { source, maj, docs: rapDocs, edt: rapEdt, tous, nbDocs: docs.length, nbEdt: edt.length };
   if (/^#\/(eleves\/|aesh\/|parametres)/.test(location.hash)) render();
@@ -655,6 +661,9 @@ function migrate(s) {
     if (!s.aesh.some(a => /\bnarya\b/i.test(a.nom || '') && /\bali\b/i.test(a.nom || ''))) s.aesh.push({ id: 'a-ali-narya', nom: 'Narya ALI', site: 'Collège', quotite: 26, statut: 'Actif', absenceDebut: null, absenceFin: null, heuresAutres: null, heuresCoordo: null, longueDuree: false, dispositif: '', email: '', couleur: '#C2477D', remarques: "Arrivée dans l'équipe le 03/12/2026.", hs: { autorise: 0, depuis: '', mouvements: [] } });
   }
   // 25/11 : Narya ALI est en voie ordinaire, sa fiche doit être rose comme le reste de l'équipe en ordinaire (elle avait été créée en bleu). Une seule fois (drapeau couleurAli2511).
+  // 26/11 : demande de Hanan, Khalida TAYARA (en arrêt longue durée) quitte l'équipe le 02/12/2026 : elle n'est plus comptée à partir de cette date.
+  // Une seule fois (drapeau sortieTayara2611) ; une date déjà saisie dans sa fiche n'est pas écrasée. Sa fiche et son historique sont gardés.
+  if (!s.sortieTayara2611) { s.sortieTayara2611 = true; const L = s.aesh.filter(a => /\bTAYARA\b/i.test(a.nom || '')); if (L.length === 1 && !L[0].dateSortie) L[0].dateSortie = '2026-12-02'; }
   if (!s.couleurAli2511) { s.couleurAli2511 = true; s.aesh.forEach(a => { if (/\bnarya\b/i.test(a.nom || '') && /\bali\b/i.test(a.nom || '') && String(a.couleur || '').toUpperCase() === '#1F7A8C') a.couleur = '#C2477D'; }); }
   s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
   s.questions = s.questions || [];
@@ -852,7 +861,7 @@ function stats(list) {
 }
 // Volume annuel : toutes les AESH sauf celles en arrêt de longue durée (case cochée dans leur fiche) ; une absence ponctuelle (grève, arrêt court) ne change pas la synthèse
 function ressource(site) {
-  const list = S.aesh.filter(a => (!site || a.site === site) && !a.longueDuree);
+  const list = equipe().filter(a => (!site || a.site === site) && !a.longueDuree);
   const vol = list.reduce((s, a) => s + (a.quotite || 0), 0);
   const aff = list.reduce((s, a) => s + charge(a).tot, 0);
   return { n: list.length, vol, aff, reste: vol - aff, manq: list.filter(a => a.quotite == null).length, dep: list.filter(a => charge(a).l === 'Dépassement').length };
@@ -884,7 +893,7 @@ const versOrdinaire = a => affOfAesh(a).filter(x => !dispositifDe(eleve(x.eleveI
 const capaciteOrdinaire = a => a.dispositif === 'ULIS' ? Math.max(versOrdinaire(a), (a.quotite || 0) - (a.heuresAutres || 0)) : versOrdinaire(a);
 // Volume annuel pour la voie ordinaire : quotité des AESH hors dispositif (sauf longue durée) + part ordinaire des AESH ULIS / SEGPA
 function ressourceOrdinaire() {
-  const ord = S.aesh.filter(a => !a.longueDuree && !a.dispositif), disp = S.aesh.filter(a => !a.longueDuree && a.dispositif);
+  const ord = equipe().filter(a => !a.longueDuree && !a.dispositif), disp = equipe().filter(a => !a.longueDuree && a.dispositif);
   const vol = ord.reduce((t, a) => t + (a.quotite || 0), 0) + disp.reduce((t, a) => t + capaciteOrdinaire(a), 0);
   const aff = ord.reduce((t, a) => t + charge(a).tot, 0) + disp.reduce((t, a) => t + versOrdinaire(a), 0);
   return { n: ord.length, vol, aff, reste: vol - aff, manq: ord.filter(a => a.quotite == null).length };
@@ -914,7 +923,7 @@ function doublonsEleve(eid) {
 const suffixeSem = set => set.size === 1 ? ` (semaine ${[...set][0]})` : '';
 function alertes() {
   const out = []; const add = (k, cat, t, h) => out.push({ k, cat, t, h });
-  S.aesh.forEach(a => { const c = charge(a); if (c.l === 'Dépassement') add('bad', 'AESH', `${a.nom} dépasse sa quotité (${hf(c.tot)} / ${hf(a.quotite)})`, '#/aesh/' + a.id); });
+  equipe().forEach(a => { const c = charge(a); if (c.l === 'Dépassement') add('bad', 'AESH', `${a.nom} dépasse sa quotité (${hf(c.tot)} / ${hf(a.quotite)})`, '#/aesh/' + a.id); });
   S.eleves.filter(isActive).forEach(e => {
     const c = couverture(e);
     if (c.l === 'Non couvert' && (e.heures || 0) > 0) add('bad', 'Élèves', `${e.nom} ${e.prenom} (${e.classe}) : aucun AESH affecté`, '#/eleves/' + e.id);
@@ -928,11 +937,12 @@ function alertes() {
   S.affectations.forEach(a => { const e = eleve(a.eleveId), x = aesh(a.aeshId); const dp = e && x && isActive(e) ? horsDispositif(x, e) : null; if (dp) add('bad', 'Affectation', `${e.nom} ${e.prenom} est en ${dp} : seules les AESH ${dp} interviennent (${x.nom} n'en fait pas partie)`, '#/eleves/' + e.id); });
   try { const d = essDus(); if (d.n) add('warn', 'AESH', `ESS de la semaine du ${frCourt(d.c.lundi)} : ${d.n} AESH à prévenir (${d.msgs.map(m => m.a.nom.split(' ')[0]).join(', ')}) — messages prêts dans l'onglet ESS`, '#/ess'); const sem = essSemaineEnCours(); if (sem.length) add('warn', 'Élèves', `${sem.length} ESS cette semaine : ${sem.map(e => `${e.nom} ${e.prenom} (${jourDe(e.essDate).slice(0, 3)}. ${frDate(e.essDate).slice(0, 5)}${e.essHeure ? ' ' + heureTxt(e.essHeure) : ''})`).join(', ')}`, '#/ess'); } catch (x) { }
   try { const r = ccRappel(); if (r.D.length) add('warn', 'Élèves', `${r.D.length} date${r.D.length > 1 ? 's' : ''} de la cité la semaine du ${frCourt(r.lundi)} : ${r.D.map(d => `${d.titre} (${deQuand(d, true)})`).join(', ')}`, '#/conseils'); if (r.L.length) add('warn', 'Élèves', `${r.L.length} conseil${r.L.length > 1 ? 's' : ''} de classe la semaine du ${frCourt(r.lundi)} : ${r.L.map(c => `${ccLib(c)} (${jourDe(c.date).slice(0, 3)}. ${frDate(c.date).slice(0, 5)} ${heureTxt(c.heure)}${c.salle ? ', salle ' + c.salle : ''})`).join(', ')}`, '#/conseils'); } catch (x) { }
-  const manq = S.aesh.filter(a => a.quotite == null).length; if (manq) out.unshift({ k: 'warn', cat: 'AESH', t: `${manq} AESH sans quotité renseignée — le volume d'heures restant disponible n'est pas calculable`, h: '#/aesh' });
+  S.aesh.filter(sortieAesh).forEach(a => { const na = S.affectations.filter(x => x.aeshId === a.id && x.heures > 0).length, nc = S.creneaux.filter(x => x.aeshId === a.id).length; if (na || nc) add('bad', 'AESH', `${a.nom} a quitté l'équipe le ${frDate(a.dateSortie)} mais a encore ${[na ? na + ' élève' + (na > 1 ? 's' : '') : '', nc ? nc + ' créneau' + (nc > 1 ? 'x' : '') : ''].filter(Boolean).join(' et ')} : à réattribuer`, '#/aesh/' + a.id); });
+  const manq = equipe().filter(a => a.quotite == null).length; if (manq) out.unshift({ k: 'warn', cat: 'AESH', t: `${manq} AESH sans quotité renseignée — le volume d'heures restant disponible n'est pas calculable`, h: '#/aesh' });
   chevauchements().forEach(x => { if (x.type !== 'aesh') return; const a = aesh(x.id); if (a) add('bad', 'AESH', `${a.nom} est à deux endroits le ${JOURS_LONGS[x.a.jour - 1]} (${x.a.debut}-${x.a.fin} / ${x.b.debut}-${x.b.fin})`, '#/aesh/' + a.id); });
   // signalements liés aux souhaits et aux règles de l'équipe (ils ne bloquent jamais)
   const R = S.regles;
-  S.aesh.filter(a => !absente(a)).forEach(a => {
+  equipe().filter(a => !absente(a)).forEach(a => {
     const so = souhaitsDe(a), mine = S.creneaux.filter(c => c.aeshId === a.id); const lien = '#/aesh/' + a.id;
     if (R.jours) so.joursOff.forEach(j => { if (mine.some(c => c.jour === j)) add('warn', 'AESH', `${a.nom} travaille le ${JOURS_LONGS[j - 1]}, jour non souhaité`, lien); });
     const dv = {}; mine.forEach(c => slotsDe(c).forEach(i => { const pi = PERIODES.indexOf(SLOTS[i]); const et = pi >= 0 ? so.dispo[c.jour + '-' + pi] : null; if (et) (dv[c.jour + '|' + i] = { j: c.jour, i, et }); }));
@@ -1015,7 +1025,7 @@ function evalAesh(aid, eid, jour, debut, fin, groupe, ignoreId) {
   return { aid, st, sc: Math.max(0, Math.min(100, sc)), R };
 }
 function proposerAesh(eid, jour, debut, fin, groupe, ignoreId) {
-  return S.aesh.map(a => evalAesh(a.id, eid, jour, debut, fin, groupe, ignoreId)).sort((x, y) => ORD_ST[x.st] - ORD_ST[y.st] || y.sc - x.sc);
+  return equipe().map(a => evalAesh(a.id, eid, jour, debut, fin, groupe, ignoreId)).sort((x, y) => ORD_ST[x.st] - ORD_ST[y.st] || y.sc - x.sc);
 }
 window.majPropositions = () => {
   const f = document.getElementById('mform'); const box = document.getElementById('propositions'); if (!f || !box) return;
@@ -1049,12 +1059,12 @@ const essSemaineEnCours = () => { const now = new Date(); return essDeLaSemaine(
 // Élèves = même effectif que la tuile « élèves suivis » de la Synthèse (effectifSuivis, règle du 22/11).
 const nbClassesSuivies = () => (S.classes || []).filter(c => elevesDe(c).some(e => !dispositifDe(e))).length; // classes en voie ordinaire avec au moins un élève suivi (pastille du menu et Synthèse) : ULIS collège et SEGPA non comptées (choix de Hanan du 26/11)
 // Heures que les AESH d'un dispositif (ULIS / SEGPA) gardent pour leur dispositif : quotité − part en voie ordinaire (hors arrêts longue durée)
-const heuresDispositif = D => S.aesh.filter(a => !a.longueDuree && a.dispositif === D).reduce((t, a) => t + Math.max(0, (a.quotite || 0) - capaciteOrdinaire(a)), 0);
+const heuresDispositif = D => equipe().filter(a => !a.longueDuree && a.dispositif === D).reduce((t, a) => t + Math.max(0, (a.quotite || 0) - capaciteOrdinaire(a)), 0);
 // Tableau « Par site » de la Synthèse (page et Word), dans l'ordre Ordinaire, ULIS, SEGPA (demande de Hanan du 26/11)
 // Sous le graphique « Heures par type » : heures notifiées des élèves (individuel / mutualisé) et heures collectives, Ordinaire / ULIS / SEGPA
 function tableTypes() {
   const act = S.eleves.filter(isActive), grp = [null, 'ULIS', 'SEGPA'], h = (D, t) => act.filter(e => dispositifDe(e) === D && e.type === t).reduce((s, e) => s + (e.heures || 0), 0);
-  const coll = D => D ? S.aesh.filter(a => !a.longueDuree && a.dispositif === D).reduce((t, a) => t + (a.heuresAutres || 0), 0) : 0;
+  const coll = D => D ? equipe().filter(a => !a.longueDuree && a.dispositif === D).reduce((t, a) => t + (a.heuresAutres || 0), 0) : 0;
   const ligne = (l, c, f) => `<tr><td><span class="dot" style="background:${c}"></span>${l}</td>${grp.map(D => `<td class="num">${f(D) ? hf(f(D)) : '—'}</td>`).join('')}<td class="num"><b>${hf(grp.reduce((t, D) => t + f(D), 0))}</b></td></tr>`;
   return `<table class="t compact tt-types" style="margin-top:10px"><thead><tr><th></th><th class="num"><span class="dot" style="background:#C2477D"></span>Ord.</th><th class="num"><span class="dot" style="background:#3BA7D9"></span>ULIS</th><th class="num"><span class="dot" style="background:#8B5A2B"></span>SEGPA</th><th class="num">Total</th></tr></thead><tbody>
     ${ligne('Indiv.', 'var(--indiv)', D => h(D, 'Individuel'))}${ligne('Mutu.', 'var(--mutu)', D => h(D, 'Mutualisé'))}${ligne('Collectif', '#8A93A6', coll)}</tbody></table>
@@ -1062,13 +1072,13 @@ function tableTypes() {
 }
 function lignesParSite() {
   const act = S.eleves.filter(isActive), r = ressourceOrdinaire(), hU = heuresDispositif('ULIS'), hS = heuresDispositif('SEGPA');
-  const aeshD = D => S.aesh.filter(a => !a.longueDuree && (a.dispositif || '') === D);
+  const aeshD = D => equipe().filter(a => !a.longueDuree && (a.dispositif || '') === D);
   const L = ['Collège', 'Lycée GT', 'Lycée Pro'].map(site => { const A = aeshD('').filter(a => a.site === site), vol = A.reduce((t, a) => t + (a.quotite || 0), 0), aff = A.reduce((t, a) => t + charge(a).tot, 0);
     return { l: site, k: 'o', st: stats(act.filter(e => !dispositifDe(e) && e.site === site)), n: A.length, vol, dispo: vol - aff }; });
   L.push({ l: 'Total voie ordinaire', k: 'o', sous: true, st: stats(act.filter(e => !dispositifDe(e))), n: aeshD('').length + aeshD('ULIS').length, vol: r.vol, dispo: r.reste, note: 'avec la part ordinaire des AESH ULIS' });
   L.push({ l: 'ULIS collège', k: 'u', st: stats(act.filter(e => dispositifDe(e) === 'ULIS')), n: aeshD('ULIS').length, vol: hU, dispo: null });
   L.push({ l: 'SEGPA', k: 's', st: stats(act.filter(e => dispositifDe(e) === 'SEGPA')), n: aeshD('SEGPA').length, vol: hS, dispo: null });
-  L.push({ l: 'Total', k: '', total: true, st: stats(act), n: S.aesh.filter(a => !a.longueDuree).length, vol: r.vol + hU + hS, dispo: r.reste });
+  L.push({ l: 'Total', k: '', total: true, st: stats(act), n: equipe().filter(a => !a.longueDuree).length, vol: r.vol + hU + hS, dispo: r.reste });
   return L;
 }
 function majCompteursMenu() {
@@ -1081,7 +1091,7 @@ function majCompteursMenu() {
   try {
     const f = effectifSuivis(), ord = f.n - f.segpa - f.ulis;
     pose('eleves', f.n, plur(f.n, 'élève') + ' suivi' + (f.n > 1 ? 's' : '') + ' (comme dans la Synthèse) : ' + ord + ' en voie ordinaire' + (f.segpa || f.ulis ? ' + ' + dontDisp(f.segpa, f.ulis) + ' notifiés' : '') + ' · ' + f.ind + ' individuel' + (f.ind > 1 ? 's' : '') + ', ' + f.mut + ' mutualisé' + (f.mut > 1 ? 's' : ''));
-    const A = S.aesh || [], nd = d => A.filter(a => (a.dispositif || '') === d).length, ld = A.filter(a => a.longueDuree).length;
+    const A = equipe(), nd = d => A.filter(a => (a.dispositif || '') === d).length, ld = A.filter(a => a.longueDuree).length;
     pose('aesh', A.length, A.length + ' AESH' + ' dans l\u2019équipe : ' + nd('') + ' en voie ordinaire, ' + nd('ULIS') + ' ULIS, ' + nd('SEGPA') + ' SEGPA' + (ld ? ' (dont ' + ld + ' en arrêt longue durée)' : ''));
     const act = S.eleves.filter(isActive), sg = act.filter(e => dispositifDe(e) === 'SEGPA'), ul = act.filter(e => dispositifDe(e) === 'ULIS'), n = x => x.filter(e => e.statut === 'Notifié').length;
     pose('dispositifs', sg.length + ul.length, plur(sg.length + ul.length, 'élève') + ' en SEGPA / ULIS collège : ' + sg.length + ' SEGPA (' + n(sg) + ' notifié' + (n(sg) > 1 ? 's' : '') + '), ' + ul.length + ' ULIS (' + n(ul) + ' notifié' + (n(ul) > 1 ? 's' : '') + ')');
@@ -1094,7 +1104,7 @@ function majCompteurAlertes() { majCompteurEss(); const el = document.getElement
 /* ====================== SYNTHÈSE PAR AESH (impression) ====================== */
 function pageSyntheseAesh() {
   setTitle('Synthèse par AESH');
-  const list = sortAesh(S.aesh);
+  const list = sortAesh(equipe());
   const cards = list.map(a => {
     const c = charge(a);
     const affs = affOfAesh(a).map(x => ({ ...x, e: eleve(x.eleveId) })); // tous les élèves suivis, quel que soit le statut du dossier ou le nombre d'heures
@@ -1109,7 +1119,7 @@ function pageSyntheseAesh() {
     ];
     return `<div class="card aesh-synth-page" style="margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-        <h2 style="margin:0">${esc(a.nom)} <span class="pill ${c.k}">${c.l}</span>${a.statut && a.statut !== 'Actif' ? ` <span class="pill warn">${esc(a.statut)}</span>` : ''}${compteurHS(a).solde ? ` <span class="pill neutral" title="Heures supplémentaires à récupérer">+${hf(compteurHS(a).solde)} à récupérer</span>` : ''}</h2>
+        <h2 style="margin:0">${esc(a.nom)} ${sortieAesh(a) ? '' : `<span class="pill ${c.k}">${c.l}</span>`}${pillSortie(a)}${a.statut && a.statut !== 'Actif' && !sortieAesh(a) ? ` <span class="pill warn">${esc(a.statut)}</span>` : ''}${compteurHS(a).solde ? ` <span class="pill neutral" title="Heures supplémentaires à récupérer">+${hf(compteurHS(a).solde)} à récupérer</span>` : ''}</h2>
         <span class="small muted">${a.site}</span>
       </div>
       <div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
@@ -1180,13 +1190,13 @@ function statsAbsences() {
 const libCreneau = cr => `${JOURS_LONGS[cr.jour - 1]} ${hh(cr.debut)}–${hh(cr.fin)}${cr.groupe ? ' (semaine ' + cr.groupe + ')' : ''}`;
 function candidatsRemplacement(cr) {
   const ST = { ok: '✓', warn: '⚠', bad: '✗' };
-  return S.aesh.filter(a => a.id !== cr.aeshId && !absente(a)).map(a => evalAesh(a.id, cr.eleveId, cr.jour, cr.debut, cr.fin, cr.groupe, cr.id)).sort((x, y) => ORD_ST[x.st] - ORD_ST[y.st] || y.sc - x.sc)
+  return equipe().filter(a => a.id !== cr.aeshId && !absente(a)).map(a => evalAesh(a.id, cr.eleveId, cr.jour, cr.debut, cr.fin, cr.groupe, cr.id)).sort((x, y) => ORD_ST[x.st] - ORD_ST[y.st] || y.sc - x.sc)
     .map(r => ({ id: r.aid, label: `${ST[r.st]} ${aesh(r.aid).nom}${r.R.length ? ' — ' + r.R.slice(0, 2).map(x => x[1]).join(', ') : ''}` }));
 }
 window.declarerAbsence = (aid = '') => {
   verifierRetours(); // une absence terminée (date de fin passée) est close avant de proposer la liste
   // Toutes les AESH sont proposées : une AESH déjà absente peut recevoir une nouvelle absence (ex. grève après un arrêt) ; l'ancienne est alors close.
-  const dispo = sortAesh(S.aesh.filter(a => !absente(a))).concat(sortAesh(S.aesh.filter(absente)));
+  const dispo = sortAesh(equipe().filter(a => !absente(a))).concat(sortAesh(equipe().filter(absente)));
   modal(`<h2>Déclarer une absence</h2><div class="form-grid">
     <label class="f wide">AESH en absence<select name="aid">${dispo.map(a => `<option value="${a.id}" ${a.id === aid ? 'selected' : ''}>${esc(a.nom)}${absente(a) ? ` — déjà absente (${esc(String(a.statut).toLowerCase())}${a.absenceFin ? ' jusqu\'au ' + frDate(a.absenceFin) : ''})` : ''}</option>`).join('')}</select></label>
     <label class="f">Motif<select name="motif">${MOTIFS_ABSENCE.map(m => `<option>${m}</option>`).join('')}</select></label>
@@ -1248,7 +1258,7 @@ function messageEquipe(aid) {
     .map(({ dt, c, e }) => `- ${jourDe(dt)} ${dt.slice(8, 10)}/${dt.slice(5, 7)} ${hh(c.debut)}–${hh(c.fin)} — ${e.site === 'Collège' ? '' : e.site + ' · '}classe ${e.classe}${libDisp(e) ? ' (élève ' + libDisp(e) + ')' : ''}${sansNomEleve(c.matiere) ? ' — ' + sansNomEleve(c.matiere) : ''}`);
   const sujet = `Remplacement à prévoir — absence de ${a.nom} ${periode}`.trim();
   const corps = `Bonjour à toutes et à tous,\n\n${a.nom} est en absence ${periode}.\nVoici les créneaux à couvrir (aucun nom d'élève dans ce message) :\n\n${lignes.join('\n') || '- (aucun créneau restant à couvrir)'}\n\nMerci de me dire par retour si vous pouvez en prendre un.\n\nCécile`;
-  const bcc = S.aesh.filter(x => !absente(x) && x.email && (a.dispositif || !x.dispositif)).map(x => x.email).join(','); // AESH ULIS / SEGPA exclues, sauf si l'absente est elle-même ULIS / SEGPA (alors toute l'équipe est prévenue)
+  const bcc = equipe().filter(x => !absente(x) && x.email && (a.dispositif || !x.dispositif)).map(x => x.email).join(','); // AESH ULIS / SEGPA exclues, sauf si l'absente est elle-même ULIS / SEGPA (alors toute l'équipe est prévenue)
   return { sujet, corps, bcc, n: L.length };
 }
 window.prevenirEquipe = aid => {
@@ -1279,11 +1289,11 @@ function apercuEleve(e) {
   return { accompagnement: e.type === 'Individuel' ? 'Accompagnement individuel' : 'Accompagnement mutualisé (plusieurs élèves de la classe)', aides: [...new Set(aides)].slice(0, 6) };
 }
 function construirePublication() {
-  const ouv = (S.absences || []).filter(x => x.ouvert), occ = [];
+  const ouv = (S.absences || []).filter(x => x.ouvert && !sortieAesh(aesh(x.aeshId))), occ = [];
   ouv.forEach(ab => creneauxACouvrir(ab.aeshId).filter(c => !c.remplacantId).forEach(c => { const e = eleve(c.eleveId);
     datesAVenir(c).map(dt => ({ id: c.id + '@' + dt, date: dt, debut: c.debut, fin: c.fin, semaine: quinzaineDe(dt) })).filter(o => !(S.prisesOcc || []).some(p => p.occId === o.id && p.parCoordination)).forEach(o => occ.push({ ...o, creneauId: c.id, absenceId: ab.id, absentId: ab.aeshId, classe: e.classe, dispositif: libDisp(e) || (dispositifDe(e) || ''), site: e.site, matiere: sansNomEleve(c.matiere), ...(S.pubApercu ? { prenom: e.prenom, apercu: apercuEleve(e) } : {}) })); }));
   const quinzaines = {}; for (let i = 0, d = lundiDe(aujourdhui()); i < 12; i++, d.setDate(d.getDate() + 7)) quinzaines[isoLocal(d)] = quinzaineDe(isoLocal(d)) || null;
-  const aeshL = S.aesh.filter(a => !absente(a) && a.email).map(a => ({ id: a.id, nom: a.nom, email: a.email, dispositif: a.dispositif || null, classes: [...new Set(affOfAesh(a).filter(x => x.heures > 0).map(x => (eleve(x.eleveId) || {}).classe).filter(Boolean))],
+  const aeshL = equipe().filter(a => !absente(a) && a.email).map(a => ({ id: a.id, nom: a.nom, email: a.email, dispositif: a.dispositif || null, classes: [...new Set(affOfAesh(a).filter(x => x.heures > 0).map(x => (eleve(x.eleveId) || {}).classe).filter(Boolean))],
     occupations: S.creneaux.filter(c => c.aeshId === a.id || c.remplacantId === a.id).map(c => ({ jour: c.jour, debut: c.debut, fin: c.fin, groupe: c.groupe || null })) }));
   const absences = ouv.map(ab => { const a = aesh(ab.aeshId); return { id: ab.id, aeshId: ab.aeshId, nom: a ? a.nom : '', dispositif: a && a.dispositif ? a.dispositif : null, debut: ab.debut || '', fin: ab.fin || '' }; });
   const lim = isoLocal(new Date(Date.now() + 14 * 864e5)), ess = S.eleves.filter(e => !e.archive && e.essDate && e.essDate >= aujourdhui() && e.essDate <= lim).map(e => ({ id: e.id, date: e.essDate, debut: e.essHeure || '', salle: e.essSalle || '', classe: e.classe, dispositif: libDisp(e) || '', aeshIds: aeshEss(e).map(a => a.id), ...(S.pubApercu ? { prenom: e.prenom } : {}) })).filter(x => x.aeshIds.length);
@@ -1418,7 +1428,7 @@ const demandeEval = id => (S.evals.demandes || []).find(d => d.id === id);
 const libDemande = d => `${jourDe(d.date)} ${frDate(d.date)} · ${hh(d.debut)}–${hh(d.fin)} · classe ${d.classe} · salle ${d.salle}`;
 async function actionEval(chemin, corps, msgOk) { try { const j = await apiServeur(chemin, corps); toast(j.message || msgOk || 'Fait'); } catch (x) { toast(x.message); } await evalsActualiser(true); render(); }
 window.evalProposer = id => {
-  const d = demandeEval(id); if (!d) return; const suit = suiveusesClasse(d.classe), L = sortAesh(S.aesh.filter(a => !absente(a) && a.email));
+  const d = demandeEval(id); if (!d) return; const suit = suiveusesClasse(d.classe), L = sortAesh(equipe().filter(a => !absente(a) && a.email));
   modal(`<h2>Proposer aux AESH</h2><p class="small muted" style="margin-top:0">${esc(libDemande(d))} (${esc(d.type)})${d.notifie ? ' · <b>élève notifié</b>' : ''}</p>
     <label style="display:block;margin:6px 0"><input type="radio" name="mode" value="choix" ${Object.keys(suit).length ? 'checked' : ''}> Seulement les AESH cochées (celles qui suivent la classe sont pré-cochées)</label>
     <div style="max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:4px 0 8px">${L.map(a => `<label style="display:flex;gap:8px;align-items:center;padding:2px 0"><input type="checkbox" name="a_${a.id}" ${suit[a.id] ? 'checked' : ''}> ${esc(a.nom)} ${suit[a.id] ? '<span class="pill ok">suit la classe</span>' : ''}</label>`).join('')}</div>
@@ -1514,7 +1524,7 @@ function pageEvals() {
 function pageAbsences() {
   if (S.prisesVues === null) { S.prisesVues = (S.prisesOcc || []).map(p => p.occId); save(); } majCompteurAbsences(); // les nouveautés restent signalées dans la bannière du haut jusqu'au clic sur « Vu »
   setTitle('Absences AESH', `<button class="btn primary" onclick="declarerAbsence()">+ Déclarer une absence</button>`);
-  const ouvertes = (S.absences || []).filter(x => x.ouvert), st = statsAbsences();
+  const ouvertes = (S.absences || []).filter(x => x.ouvert && !sortieAesh(aesh(x.aeshId))), st = statsAbsences();
   const toutes = ouvertes.flatMap(ab => creneauxACouvrir(ab.aeshId)), pris = toutes.filter(c => c.remplacantId || prisesEnLigne(c).length).length;
   const heuresACouvrir = toutes.filter(c => !c.remplacantId).reduce((t, c) => t + poidsCreneau(c.debut, c.fin) * c._dates.length, 0);
   const kpi = (v, l, k = '') => `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
@@ -1527,9 +1537,9 @@ function pageAbsences() {
       <span class="no-print"><button class="btn sm primary" onclick="prevenirEquipe('${a.id}')">Prévenir l'équipe</button> <button class="btn sm" onclick="finAbsence('${a.id}')">Fin d'absence</button></span></div>
       <div class="small muted" style="margin:6px 0 8px">${nbPris} créneau${nbPris > 1 ? 'x' : ''} pris sur ${L.length}. Les propositions tiennent compte des disponibilités, des dispositifs (ULIS / SEGPA), des souhaits et de la quotité (✓ convient · ⚠ avec réserve · ✗ indisponible). 🔒 Une heure déjà passée ne peut plus être attribuée : la personne qui remplace n'est créditée que des cours qui commencent après le moment où le créneau est pris, et si on change de remplaçant.e, les cours déjà passés restent à la personne précédente. Le créneau pris apparaît sur l'EDT de ${esc(a.nom.split(' ')[0])} et sur la fiche de la personne qui remplace.</div>
       ${L.length ? `<table class="t compact"><thead><tr><th>Date(s) et horaire</th><th>Classe</th><th>Élève</th><th>Remplaçant.e</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="muted small">Aucun créneau touché par cette absence sur la période (vacances, semaine sans cours ou EDT non saisi).</div>'}</div>`; }).join('');
-  const lignes = S.aesh.map(a => ({ a, s: st[a.id] || { nbAbs: 0, jours: 0, remplCr: 0, remplH: 0, extra: 0 } }));
+  const lignes = equipe().map(a => ({ a, s: st[a.id] || { nbAbs: 0, jours: 0, remplCr: 0, remplH: 0, extra: 0 } }));
   const maxRem = Math.max(0, ...lignes.map(x => x.s.remplH)), maxAbs = Math.max(0, ...lignes.map(x => x.s.jours));
-  const compteurs = sortAesh(S.aesh).map(a => { const s2 = st[a.id] || { nbAbs: 0, jours: 0, remplCr: 0, remplH: 0, extra: 0 }, hs = compteurHS(a);
+  const compteurs = sortAesh(equipe()).map(a => { const s2 = st[a.id] || { nbAbs: 0, jours: 0, remplCr: 0, remplH: 0, extra: 0 }, hs = compteurHS(a);
     return `<tr><td><a href="#/aesh/${a.id}" style="color:inherit;text-decoration:none"><span class="dot" style="background:${couleurAesh(a)}"></span> ${esc(a.nom)}</a></td><td class="num">${s2.nbAbs}</td><td class="num">${s2.jours ? s2.jours + ' j' : '—'}${maxAbs && s2.jours === maxAbs ? ' <span class="pill bad" title="Le plus d’absences">+ absences</span>' : ''}</td><td class="num">${s2.remplCr || '—'}</td><td class="num">${s2.remplH ? hf(s2.remplH) : '—'}${maxRem && s2.remplH === maxRem ? ' <span class="pill ok" title="Remplace le plus">+ remplace</span>' : ''}</td><td class="num">${s2.extra ? hf(s2.extra) : '—'}</td><td class="num"><b>${hs.solde ? hf(hs.solde) : '—'}</b></td></tr>`; }).join('');
   const histo = (S.absences || []).filter(x => !x.ouvert).slice().sort((p, q) => (q.debut || '').localeCompare(p.debut || '')).map(ab => { const a = aesh(ab.aeshId); return `<tr><td>${esc(a ? a.nom : '?')}</td><td>${esc(ab.motif || '')}</td><td>${ab.debut ? frDate(ab.debut) : '—'} → ${ab.fin ? frDate(ab.fin) : '—'}</td><td class="no-print" style="text-align:right"><button class="btn sm" onclick="modifierAbsence('${ab.id}')">Modifier</button></td></tr>`; }).join('');
   $('#page').innerHTML = `<div class="kpis" style="margin-bottom:14px">${kpi(ouvertes.length, 'absence' + (ouvertes.length > 1 ? 's' : '') + ' en cours', ouvertes.length ? 'warn' : 'ok')}${kpi(toutes.length - pris, 'créneaux à couvrir', toutes.length - pris ? 'bad' : 'ok')}${kpi(pris, 'créneaux pris', 'ok')}${kpi(hf(heuresACouvrir), 'heures à couvrir sur la période')}</div>
@@ -1557,7 +1567,7 @@ function pageDispositifs() {
   setTitle('SEGPA / ULIS');
   const notif = e => e.statut === 'Notifié';
   const bloc = D => {
-    const A = sortAesh(S.aesh.filter(a => a.dispositif === D)), E = sortEleves(S.eleves.filter(e => isActive(e) && dispositifDe(e) === D));
+    const A = sortAesh(equipe().filter(a => a.dispositif === D)), E = sortEleves(S.eleves.filter(e => isActive(e) && dispositifDe(e) === D));
     const versE = (a, pred) => affOfAesh(a).filter(x => pred(eleve(x.eleveId))).reduce((t, x) => t + (x.heures || 0), 0);
     const q = A.filter(a => !a.longueDuree).reduce((t, a) => t + (a.quotite || 0), 0);
     const coll = A.filter(a => !a.longueDuree).reduce((t, a) => t + (a.heuresAutres || 0), 0);
@@ -1652,8 +1662,8 @@ function pageSynthese() {
   const rep = (o, u, sg, f = x => x) => `<div class="rep"><span class="rep-o"><b>${f(o)}</b>Ordinaire</span><span class="rep-u"><b>${f(u)}</b>ULIS</span><span class="rep-s"><b>${f(sg)}</b>SEGPA</span></div>`;
   const hU = heuresDispositif('ULIS'), hS = heuresDispositif('SEGPA');
   const classes = S.classes.slice().sort(cmpClasse).map(c => { const s = stats(elevesDe(c)); return { l: c.nom, h: '#/classes', segs: [{ v: s.couv, c: 'var(--ok)', t: 'couvert' }, { v: Math.max(0, s.reste), c: 'var(--bad)', t: 'reste' }, { v: s.prev, c: 'var(--warn)', t: 'prévisionnel' }], right: `${s.n} élève${s.n > 1 ? 's' : ''}` }; }).filter(x => x.right !== '0 élèves');
-  const aeshRows = sortAesh(S.aesh).map(a => { const c = charge(a); return { l: a.nom, h: '#/aesh/' + a.id, max: a.quotite || 0, segs: [{ v: c.ind, c: 'var(--indiv)', t: 'individuel' }, { v: c.mut, c: 'var(--mutu)', t: 'mutualisé' }, ...(c.autres ? [{ v: c.autres, c: '#8A93A6', t: 'collectif' }] : []), ...(c.coordo ? [{ v: c.coordo, c: COULEUR_COORDO, t: 'coordo' }] : [])], right: a.quotite == null ? '? h' : `${hf(c.tot)} / ${a.quotite}` }; });
-  const aeshResteRows = sortAesh(S.aesh).filter(a => a.quotite != null && !absente(a) && charge(a).reste > 0).sort((p, q) => charge(q).reste - charge(p).reste).map(a => { const c = charge(a); return { l: a.nom, h: '#/aesh/' + a.id, max: a.quotite, segs: [{ v: c.reste, c: 'var(--ok)', t: 'reste à combler' }], right: `${hf(c.reste)} à combler` }; });
+  const aeshRows = sortAesh(equipe()).map(a => { const c = charge(a); return { l: a.nom, h: '#/aesh/' + a.id, max: a.quotite || 0, segs: [{ v: c.ind, c: 'var(--indiv)', t: 'individuel' }, { v: c.mut, c: 'var(--mutu)', t: 'mutualisé' }, ...(c.autres ? [{ v: c.autres, c: '#8A93A6', t: 'collectif' }] : []), ...(c.coordo ? [{ v: c.coordo, c: COULEUR_COORDO, t: 'coordo' }] : [])], right: a.quotite == null ? '? h' : `${hf(c.tot)} / ${a.quotite}` }; });
+  const aeshResteRows = sortAesh(equipe()).filter(a => a.quotite != null && !absente(a) && charge(a).reste > 0).sort((p, q) => charge(q).reste - charge(p).reste).map(a => { const c = charge(a); return { l: a.nom, h: '#/aesh/' + a.id, max: a.quotite, segs: [{ v: c.reste, c: 'var(--ok)', t: 'reste à combler' }], right: `${hf(c.reste)} à combler` }; });
   const bySite = lignesParSite().map(x => { const st = x.st, b = x.total || x.sous ? 'font-weight:700;' : ''; return `<tr class="ps-${x.k || 't'}" style="${b}${x.total ? 'border-top:2px solid var(--line2)' : ''}"><td>${x.k ? `<span class="dot" style="background:${x.k === 'o' ? '#C2477D' : x.k === 'u' ? '#3BA7D9' : '#8B5A2B'}"></span>` : ''}${x.sous || x.total ? x.l : esc(x.l)}${x.note ? ` <span class="small muted" style="font-weight:400">(${x.note})</span>` : ''}</td><td class="num">${st.n}</td><td class="num">${st.ind}</td><td class="num">${st.mut}</td><td class="num">${st.pending}</td><td class="num">${hf(st.cible)}</td><td class="num">${hf(st.couv)}</td><td class="num ${st.reste > 0 ? 'bad' : ''}">${hf(st.reste)}</td><td class="num">${x.n}</td><td class="num">${hf(x.vol)}</td><td class="num" style="color:${x.dispo == null ? 'var(--muted)' : x.dispo < 0 ? 'var(--bad)' : 'var(--ok)'}">${x.dispo == null ? '—' : hf(x.dispo)}</td></tr>`; }).join('');
   $('#page').innerHTML = `<div class="print-title">Synthèse PAS — ${esc(S.annee)}</div>
   <div class="kpis">
@@ -1666,8 +1676,8 @@ function pageSynthese() {
     ${(() => { const n = nbClassesSuivies(); return `<a href="#/classes" class="kpi" style="text-decoration:none;color:inherit;cursor:pointer"><div class="v">${n}</div><div class="l">classe${n > 1 ? 's' : ''} en voie ordinaire avec au moins un élève suivi</div></a>`; })()}
   </div>
   <div class="grid g4" style="margin-bottom:14px">
-    ${(() => { const L = S.aesh.filter(a => !absente(a) && a.quotite != null), C = L.map(a => charge(a)), som = f => C.reduce((t, c) => t + f(c), 0), vol = L.reduce((t, a) => t + a.quotite, 0);
-      return `<div class="card"><h2>Volume horaire disponible AESH <span class="small muted">quotités de ${L.length} AESH${S.aesh.some(absente) ? ' (absentes exclues)' : ''}</span></h2>${donut([{ l: 'Individuel', v: som(c => c.ind), c: 'var(--indiv)' }, { l: 'Mutualisé', v: som(c => c.mut), c: 'var(--mutu)' }, ...(som(c => c.autres) ? [{ l: 'Collectif (ULIS / SEGPA)', v: som(c => c.autres), c: '#8A93A6' }] : []), ...(som(c => c.coordo) ? [{ l: 'Coordo', v: som(c => c.coordo), c: COULEUR_COORDO }] : []), { l: 'Encore disponible', v: som(c => Math.max(0, c.reste || 0)), c: '#E3E7ED' }], 150, hf(vol))}<p class="small muted" style="margin:6px 0 0">Au centre : total des quotités (${hf(vol)}). Heures utilisées : ${hf(som(c => c.tot))}.</p></div>`; })()}
+    ${(() => { const L = equipe().filter(a => !absente(a) && a.quotite != null), C = L.map(a => charge(a)), som = f => C.reduce((t, c) => t + f(c), 0), vol = L.reduce((t, a) => t + a.quotite, 0);
+      return `<div class="card"><h2>Volume horaire disponible AESH <span class="small muted">quotités de ${L.length} AESH${equipe().some(absente) ? ' (absentes exclues)' : ''}</span></h2>${donut([{ l: 'Individuel', v: som(c => c.ind), c: 'var(--indiv)' }, { l: 'Mutualisé', v: som(c => c.mut), c: 'var(--mutu)' }, ...(som(c => c.autres) ? [{ l: 'Collectif (ULIS / SEGPA)', v: som(c => c.autres), c: '#8A93A6' }] : []), ...(som(c => c.coordo) ? [{ l: 'Coordo', v: som(c => c.coordo), c: COULEUR_COORDO }] : []), { l: 'Encore disponible', v: som(c => Math.max(0, c.reste || 0)), c: '#E3E7ED' }], 150, hf(vol))}<p class="small muted" style="margin:6px 0 0">Au centre : total des quotités (${hf(vol)}). Heures utilisées : ${hf(som(c => c.tot))}.</p></div>`; })()}
     <div class="card"><h2>Heures par type d'accompagnement <span class="small muted">graphique : voie ordinaire · clic sur un segment pour voir les élèves</span></h2>${donut([{ l: 'Individuel', v: S.eleves.filter(e => isActive(e) && e.type === 'Individuel' && !['SEGPA', 'ULIS'].includes(dispositifDe(e))).reduce((s, e) => s + (e.heures || 0), 0), c: 'var(--indiv)', href: "javascript:gotoElevesType('Individuel')" }, { l: 'Mutualisé', v: S.eleves.filter(e => isActive(e) && e.type === 'Mutualisé' && !['SEGPA', 'ULIS'].includes(dispositifDe(e))).reduce((s, e) => s + (e.heures || 0), 0), c: 'var(--mutu)', href: "javascript:gotoElevesType('Mutualisé')" }, { l: 'Prévisionnel (dossiers)', v: g.prev, c: 'var(--warn)', href: "javascript:gotoElevesStatut(['Dossier renouvellement déposé AESHi','Dossier renouvellement déposé AESHm'])" }])}${tableTypes()}</div>
     <div class="card"><h2>Couverture des élèves <span class="small muted">clic sur un segment pour voir les élèves</span></h2>${donut([{ l: 'Couverts', v: g.n - g.nonCouv - g.partiel - g.adef, c: 'var(--ok)', href: "javascript:gotoElevesCouv(['Couvert','Sur-couvert','Suivi (sans cible)'])" }, { l: 'Partiels', v: g.partiel, c: 'var(--warn)', href: "javascript:gotoElevesCouv('Partiel')" }, { l: 'Non couverts', v: g.nonCouv, c: 'var(--bad)', href: "javascript:gotoElevesCouv('Non couvert')" }, { l: 'Sans cible définie', v: g.adef, c: '#B8C2CE', href: "javascript:gotoElevesCouv('À définir')" }])}</div>
     <div class="card"><h2>Alertes <span class="pill ${al.length ? 'bad' : 'ok'}">${al.length}</span> <a href="#/alertes" class="small" style="font-weight:400">Voir tout →</a></h2><ul class="alerts" style="list-style:none;padding:0;margin:0;max-height:170px;overflow:auto">${al.length ? al.slice(0, 30).map(a => `<li><span class="dot" style="background:var(--${a.k === 'warn' ? 'warn' : 'bad'})"></span><a href="${a.h}" style="text-decoration:none;color:var(--${a.k === 'warn' ? 'warn' : 'bad'})">${esc(a.t)}</a></li>`).join('') : '<li class="muted">Aucune alerte.</li>'}</ul></div>
@@ -1714,7 +1724,7 @@ function pagePlanning() {
       const ids = elevesDe(c).map(e => e.id); const bl = S.creneaux.filter(x => ids.includes(x.eleveId)).map(x => crBlock(x, 'classe')).filter(Boolean);
       if (!bl.length) return ''; return `<div class="mini"><div class="h"><b>${esc(c.nom)}</b><span class="small muted">${ids.length} suivi${ids.length > 1 ? 's' : ''} · ${hf(dureeUnique(bl))}</span></div>${weekGrid(bl, false, 'voirFicheCreneau')}</div>`; }).join('')}</div>`;
   } else if (view.planning === 'aesh') {
-    body = `<div class="pano">${sortAesh(S.aesh.filter(a => !view.planningSite || aeshSites(a).has(view.planningSite))).map(a => { const bl = S.creneaux.filter(x => x.aeshId === a.id).map(x => crBlock(x, 'aesh')).filter(Boolean); const c = charge(a);
+    body = `<div class="pano">${sortAesh(equipe().filter(a => !view.planningSite || aeshSites(a).has(view.planningSite))).map(a => { const bl = S.creneaux.filter(x => x.aeshId === a.id).map(x => crBlock(x, 'aesh')).filter(Boolean); const c = charge(a);
       return `<div class="mini"><div class="h"><b style="white-space:nowrap"><span class="dot" style="background:${couleurAesh(a)}"></span>${esc(a.nom)}</b><span class="small muted">${hf(dureeUnique(bl))} planifiées / ${hf(c.tot)} affectées</span></div>${weekGrid(bl, false, 'voirFicheCreneau')}</div>`; }).join('')}</div>`;
   } else {
     body = `<div class="pano">${sortEleves(S.eleves.filter(e => isActive(e) && (!view.planningSite || e.site === view.planningSite))).map(e => { const bl = S.creneaux.filter(x => x.eleveId === e.id).map(x => crBlock(x, 'eleve')).filter(Boolean); if (!bl.length) return '';
@@ -1751,7 +1761,7 @@ window.editCreneau = (id, presets = {}) => {
   const c = id ? S.creneaux.find(x => x.id === id) : { jour: 1, debut: '08:00', fin: '10:00', ...presets };
   modal(`<h2>${id ? 'Modifier' : 'Nouveau'} créneau</h2><div class="form-grid">
     <label class="f">Élève<select name="eleveId" onchange="majPropositions()">${sortEleves(S.eleves.filter(isActive)).map(e => `<option value="${e.id}" ${c.eleveId === e.id ? 'selected' : ''}>${esc(e.nom)} ${esc(e.prenom)} — ${e.classe}</option>`).join('')}</select></label>
-    <label class="f">AESH<select name="aeshId" onchange="majPropositions()">${S.aesh.map(a => `<option value="${a.id}" ${c.aeshId === a.id ? 'selected' : ''}>${esc(a.nom)}</option>`).join('')}</select></label>
+    <label class="f">AESH<select name="aeshId" onchange="majPropositions()">${equipe().concat(S.aesh.filter(a => a.id === c.aeshId && sortieAesh(a))).map(a => `<option value="${a.id}" ${c.aeshId === a.id ? 'selected' : ''}>${esc(a.nom)}</option>`).join('')}</select></label>
     <label class="f">Jour<select name="jour" onchange="majPropositions()">${JOURS.map((j, i) => `<option value="${i + 1}" ${c.jour === i + 1 ? 'selected' : ''}>${j}</option>`).join('')}</select></label>
     <label class="f">Début<input type="time" name="debut" value="${c.debut}" step="900" onchange="majPropositions()"></label>
     <label class="f">Fin<input type="time" name="fin" value="${c.fin}" step="900" onchange="majPropositions()"></label>
@@ -1818,7 +1828,7 @@ function pageEleves() {
     ${sel('site', SITES.map(s => [s, s]), f.site, 'Tous sites')}${sel('type', [['Individuel', 'Individuel'], ['Mutualisé', 'Mutualisé']], f.type, 'Tous types')}
     ${sel('statut', [['pending', '⏳ Dossiers en cours'], ...STATUTS.map(s => [s, s])], f.statut, 'Tous statuts')}
     ${sel('couv', ['Couvert', 'Partiel', 'Non couvert', 'À définir', 'Suivi (sans cible)', 'Sur-couvert'].map(s => [s, s]), f.couv, 'Toute couverture')}
-    ${sel('aesh', S.aesh.map(a => [a.id, a.nom]), f.aesh, 'Tous AESH')}
+    ${sel('aesh', equipe().map(a => [a.id, a.nom]), f.aesh, 'Tous AESH')}
     <label class="small"><input type="checkbox" ${f.archive ? 'checked' : ''} onchange="setFilter('archive',this.checked)"> archivés</label>
     <span class="muted small">${list.length} élève${list.length > 1 ? 's' : ''}</span></div>
     <div class="small muted" style="margin:-6px 0 10px">Mauve = individuel · vert = mutualisé · clic sur un élève ouvre sa fiche</div>
@@ -1916,7 +1926,7 @@ function ficheEleve(id) {
    <div class="card"><h2>Notification</h2><dl class="dl">${ed('Type', 'type', 'select', ['Individuel', 'Mutualisé'])}${ed('Statut', 'statut', 'select', STATUTS)}${statutNote(e)}${/déposé/.test(e.statut || '') ? ed('Dossier déposé le', 'depotDate', 'date') : ''}${ed("Nombre d'heures à couvrir", 'heures', 'number')}${ed('Prévisionnel', 'heuresPrev', 'number')}${ed('Début notification', 'notifDebut', 'date')}${ed('Fin notification', 'notifFin', 'date')}${pastilleValidite(e) ? '<dt>Validité</dt><dd>' + pastilleValidite(e) + '</dd>' : ''}${ed('GEVASCO (validité)', 'gevasco', 'date')}${ed('Dernière réunion GEVASCO', 'gevascoDate', 'date')}${ed('ESS : date', 'essDate', 'date')}${ed('ESS : heure', 'essHeure', 'time')}${ed('ESS : salle', 'essSalle')}${e.essNote && !e.essDate ? ed('ESS : situation', 'essNote') : ''}</dl>
     <div style="margin-top:10px"><div class="gauge"><i class="${c.k === 'ok' ? '' : c.k}" style="width:${e.heures ? Math.min(100, pct(couvertes(e), e.heures)) : (couvertes(e) ? 100 : 0)}%"></i></div><div class="small muted" style="margin-top:3px">${hf(couvertes(e))} affectées${e.heures ? ' sur ' + hf(e.heures) : ''}</div></div></div>
    <div class="card"><h2>AESH affectés</h2><div class="aff-list" id="afflist">${affs.map(a => { const x = aesh(a.aeshId); return x ? `<div class="aff-item"><span style="white-space:nowrap"><span class="dot" style="background:${couleurAesh(x)}"></span><a href="#/aesh/${x.id}">${esc(x.nom)}</a>${a.aConfirmer ? ` <button type="button" class="pill warn" style="border:0;cursor:pointer;font:inherit;font-weight:600" title="Cliquer pour confirmer cette répartition" onclick="confirmerAff('${e.id}','${x.id}')">à confirmer</button>` : ''}</span>${champH(`onchange="setAff('${e.id}','${x.id}',this.value)"`, a.heures ?? 0)}<button class="btn sm ghost" onclick="setAff('${e.id}','${x.id}','')" title="Retirer">✕</button></div>` : ''; }).join('') || '<span class="muted small">Aucun AESH.</span>'}</div>
-    <div class="toolbar no-print" style="margin:10px 0 0"><select id="addaesh" style="width:auto">${S.aesh.filter(a => !affs.some(x => x.aeshId === a.id)).map(a => `<option value="${a.id}">${esc(a.nom)} (${charge(a).reste == null ? '?' : charge(a).reste + ' h dispo'})</option>`).join('')}</select><button class="btn sm" onclick="setAff('${e.id}',document.getElementById('addaesh').value,0);">+ Ajouter</button></div>
+    <div class="toolbar no-print" style="margin:10px 0 0"><select id="addaesh" style="width:auto">${equipe().filter(a => !affs.some(x => x.aeshId === a.id)).map(a => `<option value="${a.id}">${esc(a.nom)} (${charge(a).reste == null ? '?' : charge(a).reste + ' h dispo'})</option>`).join('')}</select><button class="btn sm" onclick="setAff('${e.id}',document.getElementById('addaesh').value,0);">+ Ajouter</button></div>
     <h3 style="margin-top:12px">Remarques / notes</h3><dl class="dl" style="grid-template-columns:1fr"><dd class="ed" data-f="remarques" onclick="inlineEdit('${id}','remarques','textarea',[])" title="Cliquer pour modifier">${e.remarques ? esc(e.remarques).replace(/\n/g, '<br>') : '<span class="muted">— cliquer pour ajouter une note</span>'}</dd></dl></div>
   </div>
   ${(() => { const sum = ppsSummary(e, e.niveau); const m = e.mopps; if (!sum.length && !(m && (m.aeshType || m.aeshActivites.length))) return `<div class="card" style="margin-top:14px"><h2>Aménagements PPS retenus <span class="small muted">niveau ${e.niveau}</span></h2><div class="muted small">Aucun aménagement coché pour ce niveau. <a href="#/pps/${id}">Ouvrir le document de mise en œuvre</a>.</div></div>`;
@@ -1990,7 +2000,7 @@ window.setHeuresACouvrir = (id, v) => { const e = eleve(id); const old = e.heure
 /* ====================== AESH ====================== */
 function pageAesh() {
   setTitle('AESH', `<button class="btn" onclick="mailAllAesh()">Envoyer un mail à tous</button> <button class="btn primary" onclick="editAesh()">+ AESH</button>`);
-  const list = sortAesh(S.aesh.filter(a => !view.aeshSite || aeshSites(a).has(view.aeshSite)));
+  const list = sortAesh(equipe().filter(a => !view.aeshSite || aeshSites(a).has(view.aeshSite)));
   const r = ressource(view.aeshSite);
   $('#page').innerHTML = `<div class="print-title">Équipe AESH</div><div class="toolbar"><div class="seg"><button class="${!view.aeshSite ? 'on' : ''}" onclick="setView('aeshSite','')">Tous</button>${SITES.map(s => `<button class="${view.aeshSite === s ? 'on' : ''}" onclick="setView('aeshSite','${s}')">${s}</button>`).join('')}</div>
    <span class="small muted">${r.n} AESH · volume ${hf(r.vol)} · affecté ${hf(r.aff)} · reste ${r.manq ? '? (' + r.manq + ' quotité' + (r.manq > 1 ? 's' : '') + ' manquante' + (r.manq > 1 ? 's' : '') + ')' : hf(r.reste)}</span>
@@ -2000,17 +2010,17 @@ function pageAesh() {
     const grpLabel = grp === 0 ? 'TOUS NIVEAUX' : grp === 1 ? 'ULIS' : grp === 2 ? 'SEGPA' : grp === 3 ? 'EN ABSENCE' : '';
     const brk = (i === 0 || grp > aeshGroup(list[i - 1])) ? `<div style="grid-column:1/-1;margin-top:${i === 0 ? 16 : 36}px">${grpLabel ? `<h3 style="color:${couleurAesh(a)};margin:0 0 3px;font-size:18px">${grpLabel}</h3>` : ''}</div>` : '';
     return brk + `<div class="card" style="border-top:4px solid ${couleurAesh(a)};cursor:pointer;${absente(a) ? 'background:#EEF0F2' : ''}" onclick="location.hash='#/aesh/${a.id}'">
-     <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="margin:0">${esc(a.nom)}</h2><span class="pill ${c.k}">${c.l}</span>${a.statut && a.statut !== 'Actif' ? ` <span class="pill warn">${esc(a.statut)}</span>` : ''}</div>
+     <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="margin:0">${esc(a.nom)}</h2>${sortieAesh(a) ? '' : `<span class="pill ${c.k}">${c.l}</span>`}${pillSortie(a)}${a.statut && a.statut !== 'Actif' && !sortieAesh(a) ? ` <span class="pill warn">${esc(a.statut)}</span>` : ''}</div>
      <div class="muted small">${a.site}${a.remarques ? ' · ' + esc(a.remarques) : ''}</div>
      <div style="display:flex;gap:16px;margin:10px 0 6px"><div><div style="font-size:22px;font-weight:700">${a.quotite == null ? '<span style="color:var(--warn)">?</span>' : a.quotite + ' h'}</div><div class="small muted">quotité</div></div><div><div style="font-size:22px;font-weight:700">${hf(c.tot)}</div><div class="small muted">affectées</div></div><div><div style="font-size:22px;font-weight:700;color:${c.reste == null ? 'inherit' : 'var(--' + c.k + ')'}">${c.reste == null ? '?' : hf(c.reste)}</div><div class="small muted">reste</div></div><div><div style="font-size:22px;font-weight:700">${c.n}</div><div class="small muted">élèves</div></div></div>
      <div class="gauge" style="height:10px"><i class="indiv" style="width:${a.quotite ? Math.min(100, pct(c.ind, a.quotite)) : 0}%;float:left;border-radius:4px 0 0 4px"></i><i style="width:${a.quotite ? Math.min(100 - pct(c.ind, a.quotite), pct(c.mut, a.quotite)) : 0}%;float:left;border-radius:0;background:var(--mutu)"></i>${c.autres ? `<i style="width:${a.quotite ? Math.min(100 - pct(c.ind, a.quotite) - pct(c.mut, a.quotite), pct(c.autres, a.quotite)) : 0}%;float:left;border-radius:0;background:${couleurAesh(a)}"></i>` : ''}${c.coordo ? `<i style="width:${a.quotite ? Math.max(0, Math.min(100 - pct(c.ind, a.quotite) - pct(c.mut, a.quotite) - pct(c.autres, a.quotite), pct(c.coordo, a.quotite))) : 0}%;float:left;border-radius:0;background:${COULEUR_COORDO}"></i>` : ''}</div>
      <div class="small muted" style="margin-top:4px"><span style="white-space:nowrap"><span class="dot" style="background:var(--indiv)"></span>individuel ${hf(c.ind)}</span> <span style="white-space:nowrap"><span class="dot" style="background:var(--mutu);margin-left:8px"></span>mutualisé ${hf(c.mut)}</span>${c.autres ? ` <span style="white-space:nowrap"><span class="dot" style="background:${a.couleur};margin-left:8px"></span>collectif ${hf(c.autres)}</span>` : ''}${c.coordo ? ` <span style="white-space:nowrap"><span class="dot" style="background:${COULEUR_COORDO};margin-left:8px"></span>coordo ${hf(c.coordo)}</span>` : ''}</div>
      ${(() => { const L = affOfAesh(a).map(x => ({ e: eleve(x.eleveId), h: x.heures || 0, conf: x.aConfirmer })).filter(x => x.e).sort((p, q) => (p.e.type === q.e.type ? 0 : p.e.type === 'Individuel' ? -1 : 1) || p.e.classe.localeCompare(q.e.classe, 'fr') || p.e.nom.localeCompare(q.e.nom, 'fr'));
        return L.length ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)"><div class="small muted" style="margin-bottom:4px">${L.length} élève${L.length > 1 ? 's' : ''} suivi${L.length > 1 ? 's' : ''}</div><div style="display:flex;flex-wrap:wrap;gap:4px">${L.map(x => `<a href="#/eleves/${x.e.id}" onclick="event.stopPropagation()" style="text-decoration:none;color:inherit;font-size:12px;line-height:1.25;border:1px solid var(--line);border-left:3px solid var(${x.e.type === 'Individuel' ? '--indiv' : '--mutu'});border-radius:6px;padding:2px 6px;background:var(--surface)" title="${esc(x.e.nom + ' ' + x.e.prenom + ' · ' + x.e.classe + ' · ' + hf(x.h))}"><b>${esc(x.e.nom)}</b> ${esc(x.e.prenom)} <span class="muted">${esc(x.e.classe)}${libDisp(x.e) ? ' ' + libDisp(x.e) : ''} · ${hf(x.h)}${x.conf ? ' ?' : ''}</span></a>`).join('')}</div></div>` : ''; })()}
-    </div>`; }).join('')}</div>`;
+    </div>`; }).join('')}</div>${(() => { const P = sortAesh(S.aesh.filter(sortieAesh)); return P.length ? `<div class="card no-print" style="margin-top:28px;background:#F6F7F9"><h2 style="margin:0 0 6px">Anciennes AESH <span class="pill neutral">${P.length}</span></h2><p class="small muted" style="margin:0 0 6px">Plus comptées dans l'équipe ni dans la Synthèse. Fiche, journal et absences gardés. Pour la réintégrer : « Modifier » et effacer la date de sortie.</p><table class="t compact"><tbody>${P.map(a => `<tr class="row" onclick="location.hash='#/aesh/${a.id}'"><td><b>${esc(a.nom)}</b></td><td class="small muted">sortie de l'équipe le ${frDate(a.dateSortie)}</td></tr>`).join('')}</tbody></table></div>` : ''; })()}`;
 }
 window.mailAllAesh = () => {
-  const emails = S.aesh.filter(a => a.email).map(a => a.email);
+  const emails = equipe().filter(a => a.email).map(a => a.email);
   if (!emails.length) return alert('Aucune adresse e-mail renseignée.');
   location.href = 'mailto:?bcc=' + emails.join(',') + '&subject=' + encodeURIComponent('Équipe AESH');
 };
@@ -2037,6 +2047,7 @@ window.editAesh = id => {
       <div class="small muted" style="grid-column:1/-1">Retour automatique : l'AESH repasse « Actif » le lendemain de la date de fin.</div>
     </div>
     <label class="f wide" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="longueDuree" ${a.longueDuree ? 'checked' : ''} style="width:auto"> Arrêt de longue durée : ne pas compter sa quotité dans la synthèse annuelle</label>
+    <label class="f">Sortie de l'équipe le <span class="small muted">démission, mutation, fin de contrat : à partir de cette date, elle n'est plus comptée nulle part (l'historique est gardé)</span><input type="date" name="dateSortie" value="${a.dateSortie || ''}"></label>
     <label class="f">Heures collectives (h) <span class="small muted">hors élève individuel — ex. ULIS, SEGPA</span>${champH('name="heuresAutres"', a.heuresAutres)}</label>
     <label class="f">Heures de coordination (h) <span class="small muted">travaillées en coordo : comptées dans ses heures, plus « disponibles »</span>${champH('name="heuresCoordo"', a.heuresCoordo)}</label>
     <label class="f">Dispositif <span class="small muted">seules les AESH ULIS suivent les élèves ULIS du collège, seules les AESH SEGPA les élèves SEGPA</span><select name="dispositif"><option value="">Aucun (élèves en ordinaire)</option>${DISPOSITIFS.map(x => `<option ${a.dispositif === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
@@ -2049,14 +2060,14 @@ window.editAesh = id => {
       <span style="width:170px;display:inline-block">${champH('id="attach-eleve-heures" placeholder="heures / semaine"', null)}</span>
       <button type="button" class="btn sm" onclick="attacherEleve('${id}')">+ Rattacher</button></div>`; })() : ''}`,
     d => { if (!d.nom.trim()) { alert('Nom obligatoire'); return false; } if (Number.isNaN(num(d.quotite)) || Number.isNaN(num(d.heuresAutres)) || Number.isNaN(num(d.heuresCoordo))) { alert(H_ILLISIBLE); return false; } const nomParts = d.nom.trim().split(' '); const nomFmt = nomParts.length > 1 ? nomParts[0] + ' ' + nomParts.slice(1).join(' ').toUpperCase() : nomParts[0];
-      const obj = { nom: nomFmt, site: d.site, quotite: num(d.quotite), statut: d.statut, absenceDebut: d.statut !== 'Actif' ? (d.absenceDebut || null) : null, absenceFin: d.statut !== 'Actif' ? (d.absenceFin || null) : null, heuresAutres: num(d.heuresAutres), heuresCoordo: num(d.heuresCoordo), longueDuree: !!d.longueDuree, dispositif: d.dispositif || '', email: d.email.trim(), couleur: d.couleur, remarques: d.remarques };
-      if (id) { const chg = a.quotite !== obj.quotite ? ` (quotité ${a.quotite ?? '—'} → ${obj.quotite ?? '—'})` : ''; const dchg = a.dispositif !== obj.dispositif ? ` (dispositif ${a.dispositif || 'aucun'} → ${obj.dispositif || 'aucun'})` : ''; const avantAbs = !!absenceOuverte(a.id); Object.assign(a, obj); syncAbsence(a); if (avantAbs !== !!absenceOuverte(a.id)) setTimeout(() => publierAuto(), 300); const nb = synchroDispositifs(); commit('aesh', `${a.nom} modifié${chg}${dchg}${nb ? ' — élèves ULIS / SEGPA rattachés automatiquement' : ''}`); }
+      const obj = { nom: nomFmt, site: d.site, quotite: num(d.quotite), statut: d.statut, absenceDebut: d.statut !== 'Actif' ? (d.absenceDebut || null) : null, absenceFin: d.statut !== 'Actif' ? (d.absenceFin || null) : null, heuresAutres: num(d.heuresAutres), heuresCoordo: num(d.heuresCoordo), longueDuree: !!d.longueDuree, dispositif: d.dispositif || '', email: d.email.trim(), couleur: d.couleur, remarques: d.remarques, dateSortie: d.dateSortie || null };
+      if (id) { const chg = a.quotite !== obj.quotite ? ` (quotité ${a.quotite ?? '—'} → ${obj.quotite ?? '—'})` : ''; const dchg = a.dispositif !== obj.dispositif ? ` (dispositif ${a.dispositif || 'aucun'} → ${obj.dispositif || 'aucun'})` : ''; const avantAbs = !!absenceOuverte(a.id); const schg = (a.dateSortie || null) !== obj.dateSortie ? (obj.dateSortie ? ` (sortie de l'équipe le ${frDate(obj.dateSortie)})` : ' (date de sortie retirée)') : ''; Object.assign(a, obj); syncAbsence(a); if (avantAbs !== !!absenceOuverte(a.id)) setTimeout(() => publierAuto(), 300); const nb = synchroDispositifs(); commit('aesh', `${a.nom} modifié${chg}${dchg}${schg}${nb ? ' — élèves ULIS / SEGPA rattachés automatiquement' : ''}`); }
       else { const n = { id: uid('a'), ...obj }; S.aesh.push(n); const nb = synchroDispositifs(); commit('aesh', `AESH ajouté : ${n.nom}${nb ? ' — élèves ULIS / SEGPA rattachés automatiquement' : ''}`); location.hash = '#/aesh/' + n.id; } },
     id ? async () => { if (!(await demander(`Supprimer ${a.nom} et toutes ses affectations ?`, { ok: 'Supprimer', danger: true }))) return; S.creneaux = S.creneaux.filter(x => x.aeshId !== id); S.aesh = S.aesh.filter(x => x.id !== id); synchroDispositifs(); S.affectations = S.affectations.filter(x => x.aeshId !== id); commit('aesh', `AESH supprimé : ${a.nom}`); location.hash = '#/aesh'; } : null);
 };
 function remplacementCard(a) {
   const mesCreneaux = creneauxACouvrir(a.id); // seulement les créneaux touchés par l'absence (jours de la période), pas toute la semaine
-  const autresAesh = sortAesh(S.aesh.filter(x => x.id !== a.id && !absente(x)));
+  const autresAesh = sortAesh(equipe().filter(x => x.id !== a.id && !absente(x)));
   const periode = a.absenceDebut || a.absenceFin ? ` du ${a.absenceDebut ? new Date(a.absenceDebut).toLocaleDateString('fr-FR') : '?'} au ${a.absenceFin ? new Date(a.absenceFin).toLocaleDateString('fr-FR') : '?'}` : '';
   if (!mesCreneaux.length) return `<div class="card" style="border-left:4px solid var(--warn);background:#FFF8EC;margin-bottom:14px"><b>Absence${periode}</b> — aucun créneau de ${esc(a.nom)} n'est touché sur cette période (vacances, jour sans cours ou EDT non saisi), rien à répartir.</div>`;
   const joursPresents = [...new Set(mesCreneaux.map(x => x._dates[0]))];
@@ -2103,7 +2114,10 @@ window.terminerRemplacement = async aeshId => {
 /* Retour automatique : une AESH en arrêt ou en congés redevient « Actif » le lendemain de sa date de fin d'absence. */
 function verifierRetours() {
   const auj = aujourdhui(); const revenues = [];
-  S.aesh.forEach(a => {
+  const sorties = S.aesh.filter(a => sortieAesh(a) && a.sortieNotee !== a.dateSortie);
+  sorties.forEach(a => { a.sortieNotee = a.dateSortie; log('aesh', `${a.nom} ne fait plus partie de l'équipe AESH depuis le ${frDate(a.dateSortie)} (fiche et historique gardés, dans « AESH » › « Anciennes AESH »)`); });
+  if (sorties.length) { save(); render(); }
+  S.aesh.forEach(a => { if (sortieAesh(a)) return;
     if (!absente(a) || !a.absenceFin || auj <= a.absenceFin) return;
     const n = archiverRemplacements(a.id); const ab = (S.absences || []).find(x => x.aeshId === a.id && x.ouvert); if (ab) { ab.ouvert = false; ab.fin = a.absenceFin; }
     const motif = String(a.statut).toLowerCase();
@@ -2134,7 +2148,7 @@ function ficheAesh(id) {
   setTitle(a.nom, `${a.email ? `<a class="btn" href="mailto:${esc(a.email)}">Envoyer un mail</a> ` : ''}<button class="btn" onclick="exportWordAesh('${id}')">Word</button> <button class="btn" onclick="editAesh('${id}')">Modifier</button>`);
   const byClass = {}; affs.forEach(x => { byClass[x.e.classe] = (byClass[x.e.classe] || 0) + x.heures; });
   $('#page').innerHTML = `<div class="print-title">Fiche AESH — ${esc(a.nom)}</div>
-  <div class="fiche-head" style="${absente(a) ? 'background:#EEF0F2;border-radius:var(--radius)' : ''}"><div class="avatar" style="background:${couleurAesh(a)}">${ini(a)}</div><div><div style="font-size:18px;font-weight:650">${esc(a.nom)} <span class="pill ${c.k}">${c.l}</span>${a.statut && a.statut !== 'Actif' ? ` <span class="pill warn">${esc(a.statut)}</span>` : ''}</div><div class="muted">${a.site}${a.dispositif ? ' · <b>dispositif ' + a.dispositif + '</b>' : ''}${a.remarques ? ' · ' + esc(a.remarques) : ''}${a.email ? ' · <a href="mailto:' + esc(a.email) + '" style="color:inherit">' + esc(a.email) + '</a>' : ''}</div></div></div>
+  <div class="fiche-head" style="${absente(a) ? 'background:#EEF0F2;border-radius:var(--radius)' : ''}"><div class="avatar" style="background:${couleurAesh(a)}">${ini(a)}</div><div><div style="font-size:18px;font-weight:650">${esc(a.nom)} ${sortieAesh(a) ? '' : `<span class="pill ${c.k}">${c.l}</span>`}${pillSortie(a)}${a.statut && a.statut !== 'Actif' && !sortieAesh(a) ? ` <span class="pill warn">${esc(a.statut)}</span>` : ''}</div><div class="muted">${a.site}${a.dispositif ? ' · <b>dispositif ' + a.dispositif + '</b>' : ''}${a.remarques ? ' · ' + esc(a.remarques) : ''}${a.email ? ' · <a href="mailto:' + esc(a.email) + '" style="color:inherit">' + esc(a.email) + '</a>' : ''}</div></div></div>
   <div class="kpis" style="grid-template-columns:repeat(${5 + (c.autres ? 1 : 0) + (c.coordo ? 1 : 0)},1fr)">
    <div class="kpi ${a.quotite == null ? 'warn' : ''}"><div class="v" data-af="quotite" title="Cliquer pour modifier" style="cursor:pointer" onclick="inlineEditAesh('${id}','quotite','number')">${a.quotite == null ? '<span class="muted">— cliquer pour saisir</span>' : a.quotite + ' h'}</div><div class="l">quotité hebdo</div></div>
    <div class="kpi indiv"><div class="v">${hf(c.ind)}</div><div class="l">individuel</div></div>
@@ -2144,7 +2158,7 @@ function ficheAesh(id) {
    <div class="kpi ${c.reste == null ? '' : c.k}"><div class="v">${c.reste == null ? '?' : hf(c.reste)}</div><div class="l">reste disponible</div></div>
    <div class="kpi"><div class="v">${c.taux == null ? '—' : Math.round(c.taux * 100) + ' %'}</div><div class="l">taux d'occupation</div></div></div>
   ${conflits.length ? `<div class="card" style="border-left:4px solid var(--bad);background:var(--bad-soft);margin-bottom:14px">⚠ <b>${conflits.length} chevauchement${conflits.length > 1 ? 's' : ''} d'horaires</b> détecté${conflits.length > 1 ? 's' : ''} dans l'emploi du temps de ${esc(a.nom)} : ${conflits.map(x => `le ${JOURS[x.a.jour - 1]} (${x.a.debut}–${x.a.fin} et ${x.b.debut}–${x.b.fin})`).join(', ')}.</div>` : ''}
-  ${absente(a) ? remplacementCard(a) : ''}
+  ${absente(a) && !sortieAesh(a) ? remplacementCard(a) : ''}
   ${remplacementsEnCoursCard(a)}
   <div class="grid g2">
    <div class="card"><h2>Élèves suivis (${affs.length}) <span class="small muted">dont ${notifies} notifié${notifies > 1 ? 's' : ''}</span></h2>
@@ -2235,7 +2249,7 @@ window.setRegle = (k, v) => { S.regles[k] = v; commit('param', `Règle d'équipe
 function pageAffectation() {
   setTitle('Affectation');
   const els = sortEleves(S.eleves.filter(isActive));
-  const aeshList = sortAesh(S.aesh);
+  const aeshList = sortAesh(equipe());
   const head = `<tr><th class="name">Élève</th><th style="text-align:right">À couvrir</th>${aeshList.map(a => `<th class="col" style="--c:${couleurAesh(a)}" title="${esc(a.nom)} · quotité ${a.quotite ?? '?'} h">${esc(a.nom)}</th>`).join('')}<th>Total</th><th>Écart</th></tr>`;
   const rows = els.map(e => { const tot = couvertes(e); const ec = e.heures == null ? null : e.heures - tot; const k = ec == null ? '' : ec < 0 ? 'bad' : ec > 0 ? 'warn' : 'ok';
     return `<tr><td class="name"><a href="#/eleves/${e.id}" style="text-decoration:none;color:inherit"><span class="dot" style="background:var(--${e.type === 'Individuel' ? 'indiv' : 'mutu'})"></span><b>${esc(e.nom)}</b> ${esc(e.prenom)}</a> <span class="muted">${esc(e.classe)}</span></td><td class="tot">${hf(e.heures)}</td>
@@ -2303,7 +2317,7 @@ function carteDossiers() {
   const d = DOSS, nbRat = Object.values(d.docs.parEleve).reduce((t, l) => t + l.length, 0);
   const dateFr2 = m => m ? new Date(m).toLocaleDateString('fr-FR') : '—';
   const src = d.source === 'dossier' ? 'Les dossiers sont lus en direct à chaque ouverture de l\'application et au retour sur la fenêtre.' : `Version navigateur / téléphone : liste générée le ${d.maj ? new Date(d.maj).toLocaleString('fr-FR') : '—'} (l'application Mac lit les dossiers en direct).`;
-  const edtRows = sortAesh(S.aesh).map(a => { const f = d.edt.parAesh[a.id]; return `<tr><td>${esc(a.nom)}</td><td class="small">${f ? esc(f.name) : (a.edt ? '<span class="muted">' + esc(a.edt) + ' (copie enregistrée)</span>' : '<span class="muted">aucun fichier</span>')}</td><td class="small">${f ? dateFr2(f.mtime) : '—'}</td></tr>`; }).join('');
+  const edtRows = sortAesh(equipe()).map(a => { const f = d.edt.parAesh[a.id]; return `<tr><td>${esc(a.nom)}</td><td class="small">${f ? esc(f.name) : (a.edt ? '<span class="muted">' + esc(a.edt) + ' (copie enregistrée)</span>' : '<span class="muted">aucun fichier</span>')}</td><td class="small">${f ? dateFr2(f.mtime) : '—'}</td></tr>`; }).join('');
   const classer = d.docs.aClasser.map(a => `<li><a href="javascript:ouvrirDoc(${a.fichier.i})">${esc(a.fichier.name)}</a> <span class="small muted">— ${a.candidats.length ? 'élève douteux : ' + a.candidats.map(e => esc(e.nom + ' ' + e.prenom)).join(' / ') : 'aucun élève reconnu'}</span></li>`).join('');
   return `<div class="card" style="margin-top:14px"><h2>Documents et EDT papier <span class="small muted">mise à jour automatique</span></h2>
     <p class="small muted" style="margin:0 0 8px">${src} Dossiers : « Aménagements / Notifications » (${d.nbDocs} fichier${d.nbDocs > 1 ? 's' : ''}, ${nbRat} rattaché${nbRat > 1 ? 's' : ''} à un élève) et « EDT AESH » (${d.nbEdt} fichier${d.nbEdt > 1 ? 's' : ''}). Rien à saisir : dépose les fichiers dans les dossiers, chaque année, avec <b>NOM Prénom</b> dans le nom du fichier ; l'EDT papier le plus récent de chaque AESH remplace l'ancien.</p>
@@ -2331,7 +2345,7 @@ function pageParametres() {
     <div class="toolbar"><button class="btn danger" onclick="reinitialiser()">Réinitialiser</button>
     <button class="btn danger" onclick="viderPlanning()">Vider le planning</button></div>
     <h2 style="margin-top:18px">Listes de valeurs</h2><p class="small">Statuts de dossier : ${STATUTS.map(s => `<span class="pill neutral">${s}</span>`).join(' ')}</p><p class="small">Sites : ${SITES.join(', ')} · Niveaux : ${NIVEAUX.join(', ')}</p>
-    <h2 style="margin-top:18px">Chiffres</h2><p class="small muted">${S.eleves.length} élèves (${S.eleves.filter(e => e.archive).length} archivés) · ${S.aesh.length} AESH · ${S.classes.length} classes · ${S.affectations.length} affectations · ${S.creneaux.length} créneaux · ${S.journal.length} entrées de journal · ${(JSON.stringify(S).length / 1024).toFixed(0)} Ko</p></div></div>
+    <h2 style="margin-top:18px">Chiffres</h2><p class="small muted">${S.eleves.length} élèves (${S.eleves.filter(e => e.archive).length} archivés) · ${equipe().length} AESH${S.aesh.length > equipe().length ? ' (+ ' + (S.aesh.length - equipe().length) + ' sortie' + (S.aesh.length - equipe().length > 1 ? 's' : '') + ' de l\u2019équipe)' : ''} · ${S.classes.length} classes · ${S.affectations.length} affectations · ${S.creneaux.length} créneaux · ${S.journal.length} entrées de journal · ${(JSON.stringify(S).length / 1024).toFixed(0)} Ko</p></div></div>
   ${carteRegles()}
   ${carteCalendrier()}`;
 }
@@ -2439,14 +2453,14 @@ window.importJSON = file => { if (!file) return; const r = new FileReader(); r.o
    donc ses remplacements en cours), les heures d'affectation sont mises à jour. */
 const nrmNom = x => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z]+/g, ' ').trim();
 const motsDe = x => nrmNom(x).split(' ').filter(Boolean);
-const trouverAesh = nom => { const m = motsDe(nom); if (!m.length) return []; return S.aesh.filter(a => { const t = motsDe(a.nom); return m.every(w => t.includes(w)); }); };
+const trouverAesh = nom => { const m = motsDe(nom); if (!m.length) return []; return equipe().filter(a => { const t = motsDe(a.nom); return m.every(w => t.includes(w)); }); };
 const trouverEleve = (nom, classe) => { const m = motsDe(nom); if (!m.length) return []; let L = S.eleves.filter(e => { const t = motsDe(e.nom + ' ' + e.prenom); return m.every(w => t.includes(w)); }); if (L.length > 1 && classe) { const f = L.filter(e => normClasse(e.classe) === normClasse(classe)); if (f.length) L = f; } if (L.length > 1) { const act = L.filter(isActive); if (act.length) L = act; } return L; };
 const heuresCreneaux = L => L.reduce((t, c) => t + (c.groupe ? 0.5 : 1) * Math.max(0.5, Math.round((t2m(c.fin) - t2m(c.debut)) / 30) * 0.5), 0);
 let EDT_IMPORT = null;
 window.importEdtAesh = file => { if (!file) return; const r = new FileReader(); r.onload = () => {
   let d; try { d = JSON.parse(r.result); if (d.type !== 'edt-aesh' || (!Array.isArray(d.edt) && !Array.isArray(d.eleves) && !Array.isArray(d.conseils) && !Array.isArray(d.affectations))) throw 0; d.edt = d.edt || []; d.eleves = d.eleves || []; d.affectations = d.affectations || []; } catch { alert("Ce fichier n'est pas un fichier d'emplois du temps AESH."); return; }
   EDT_IMPORT = d;
-  const optA = (sel) => `<option value="">— choisir —</option>` + sortAesh(S.aesh).map(a => `<option value="${a.id}" ${sel === a.id ? 'selected' : ''}>${esc(a.nom)}</option>`).join('');
+  const optA = (sel) => `<option value="">— choisir —</option>` + sortAesh(equipe()).map(a => `<option value="${a.id}" ${sel === a.id ? 'selected' : ''}>${esc(a.nom)}</option>`).join('');
   const optE = (sel) => `<option value="">— choisir —</option>` + sortEleves(S.eleves).map(e => `<option value="${e.id}" ${sel === e.id ? 'selected' : ''}>${esc(e.nom)} ${esc(e.prenom)} — ${esc(e.classe)}${e.archive ? ' (archivé)' : ''}</option>`).join('');
   const blocs = d.edt.map((x, i) => { const ca = trouverAesh(x.aesh); const aId = ca.length === 1 ? ca[0].id : '';
     const noms = [...new Set(x.creneaux.map(c => c.eleve))];
@@ -2519,8 +2533,8 @@ window.exportExcel = async () => {
   if (!window.XLSX) { toast('Chargement de la librairie…'); await new Promise((ok, ko) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload = ok; s.onerror = ko; document.head.appendChild(s); }).catch(() => alert('Impossible de charger la librairie Excel (pas de connexion). Utilise l\'export CSV.')); if (!window.XLSX) return; }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(elevesRows()), 'Élèves');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(S.aesh.map(a => { const c = charge(a); return { AESH: a.nom, Site: a.site, Quotité: a.quotite ?? '', Individuel: c.ind, Mutualisé: c.mut, Total: c.tot, Reste: c.reste ?? '', 'Nb élèves': c.n, Statut: c.l }; })), 'AESH');
-  const grid = sortEleves(S.eleves.filter(isActive)).map(e => { const o = { Élève: `${e.nom} ${e.prenom}`, Classe: e.classe, Cible: e.heures ?? '' }; S.aesh.forEach(a => { const x = S.affectations.find(z => z.eleveId === e.id && z.aeshId === a.id); o[a.nom] = x && x.heures ? x.heures : ''; }); o.Total = couvertes(e); return o; });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(equipe().map(a => { const c = charge(a); return { AESH: a.nom, Site: a.site, Quotité: a.quotite ?? '', Individuel: c.ind, Mutualisé: c.mut, Total: c.tot, Reste: c.reste ?? '', 'Nb élèves': c.n, Statut: c.l }; })), 'AESH');
+  const grid = sortEleves(S.eleves.filter(isActive)).map(e => { const o = { Élève: `${e.nom} ${e.prenom}`, Classe: e.classe, Cible: e.heures ?? '' }; equipe().forEach(a => { const x = S.affectations.find(z => z.eleveId === e.id && z.aeshId === a.id); o[a.nom] = x && x.heures ? x.heures : ''; }); o.Total = couvertes(e); return o; });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grid), 'Affectation');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(S.creneaux.map(c => ({ Élève: eleve(c.eleveId) ? eleve(c.eleveId).nom + ' ' + eleve(c.eleveId).prenom : '', Classe: eleve(c.eleveId)?.classe, AESH: aesh(c.aeshId)?.nom, Jour: JOURS[c.jour - 1], Début: c.debut, Fin: c.fin }))), 'Créneaux');
   XLSX.writeFile(wb, `cockpit-pas_${S.annee}.xlsx`);
@@ -2782,7 +2796,7 @@ window.retirerPriseOcc = occId => {
 window.changerPriseOcc = occId => {
   const p = (S.prisesOcc || []).find(x => x.occId === occId); if (!p) { toast('Ce remplacement a déjà été retiré.'); render(); return; }
   const r = aesh(p.remplacantId), ab = aesh(p.absentId), cr = S.creneaux.find(c => c.id === p.creneauId);
-  const cands = (cr ? candidatsRemplacement(cr) : sortAesh(S.aesh.filter(a => !absente(a))).map(a => ({ id: a.id, label: a.nom }))).filter(c => c.id !== p.remplacantId);
+  const cands = (cr ? candidatsRemplacement(cr) : sortAesh(equipe().filter(a => !absente(a))).map(a => ({ id: a.id, label: a.nom }))).filter(c => c.id !== p.remplacantId);
   modal(`<h2>Mettre quelqu'un d'autre</h2><p class="small muted" style="margin-top:0">${libPrise(p)} · absence de ${esc(ab ? ab.nom : '?')}. Aujourd'hui : <b>${esc(r ? r.nom : '?')}</b>.</p><div class="form-grid">
     <label class="f wide">Nouvelle remplaçante<select name="aid" required><option value="">— choisir —</option>${cands.map(c => `<option value="${c.id}">${esc(c.label)}</option>`).join('')}</select></label>
     <label class="f wide" style="flex-direction:row;gap:8px;align-items:center"><input type="checkbox" name="mail" checked style="width:auto"> Ouvrir un mail pour prévenir les deux collègues</label></div>
@@ -2804,7 +2818,7 @@ window.modifierAbsence = id => {
   const motifs = MOTIFS_ABSENCE.includes(ab.motif) ? MOTIFS_ABSENCE : [ab.motif, ...MOTIFS_ABSENCE].filter(Boolean);
   const L = liensAbsence(ab), nbLiens = L.arch.length + L.segs.length + L.prises.length;
   modal(`<h2>Modifier une absence terminée</h2><div class="form-grid">
-    <label class="f wide">AESH<select name="aid">${sortAesh(S.aesh).map(a => `<option value="${a.id}" ${a.id === ab.aeshId ? 'selected' : ''}>${esc(a.nom)}</option>`).join('')}</select></label>
+    <label class="f wide">AESH<select name="aid">${sortAesh(equipe().concat(S.aesh.filter(a => a.id === ab.aeshId && sortieAesh(a)))).map(a => `<option value="${a.id}" ${a.id === ab.aeshId ? 'selected' : ''}>${esc(a.nom)}</option>`).join('')}</select></label>
     <label class="f">Motif<select name="motif">${motifs.map(m => `<option ${m === ab.motif ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></label>
     <label class="f">Du<input type="date" name="debut" value="${esc(ab.debut || '')}" required></label>
     <label class="f">Au<input type="date" name="fin" value="${esc(ab.fin || '')}" required></label></div>

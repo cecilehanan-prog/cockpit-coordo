@@ -9,6 +9,9 @@
    - Les mails ne partent pas tout seuls : Cockpit ouvre un brouillon de mail prêt à envoyer. */
 (() => {
 'use strict';
+// 26/11 : AESH sorties de l'équipe (champ dateSortie, voir app.js) : plus de lien perso, plus de mail, plus de fiche en ligne à partir de cette date
+const jourIso = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const equipeA = () => (S().aesh || []).filter(a => !(a.dateSortie && jourIso() >= a.dateSortie));
 const ORIGINE = 'https://enligne.coordo'; // adresse « interne » : jamais contactée, interceptée ci-dessous
 // toujours l'adresse Netlify, quel que soit l'endroit où le cockpit est ouvert (appli Mac, ancienne adresse github.io…)
 const BASE = 'https://cockpit-coordo.netlify.app/';
@@ -75,7 +78,7 @@ async function activer() {
 /* ---------- état d'administration ---------- */
 async function lireConfig(db, cfg) { const s = await racine(db, cfg).collection('admin').doc('config').get(); return Object.assign({ membres: {}, prevenues: [] }, s.exists ? s.data() : {}); }
 async function membresAJour() {
-  const { db } = await fb(), cfg = cfgEnLigne(), conf = await lireConfig(db, cfg), A = S().aesh || []; let neuf = false;
+  const { db } = await fb(), cfg = cfgEnLigne(), conf = await lireConfig(db, cfg), A = equipeA(); let neuf = false;
   for (const a of A) if (!conf.membres[a.id]) { conf.membres[a.id] = alea(24); neuf = true; await racine(db, cfg).collection('membres').doc(conf.membres[a.id]).set({ aeshId: a.id, nom: a.nom, maj: '' }); }
   if (neuf) await racine(db, cfg).collection('admin').doc('config').set(conf, { merge: true });
   return conf;
@@ -118,7 +121,7 @@ async function republier(db, cfg, ctx) {
   const numEleve = crId => { const c = (S().creneaux || []).find(x => x.id === crId); return (c && (F.codes || {})[c.eleveId]) || ''; };
   const occ = (pub && pub.occurrences || []).filter(o => o.date >= auj()).map(o => { const p = prises[o.id]; return { id: o.id, creneauId: o.creneauId, date: o.date, debut: o.debut, fin: o.fin, semaine: o.semaine || '', eleve: numEleve(o.creneauId), fiche: numEleve(o.creneauId) ? lienFiche(numEleve(o.creneauId)) : '', site: o.site || '', matiere: o.matiere || '', absent: nomA(o.absentId), prisPar: p && !p.annulee ? p.aeshId : null, prisParNom: p && !p.annulee ? nomA(p.aeshId) : '' }; });
   const batch = db.batch(), aMettre = {}; let n = 0;
-  for (const a of (S().aesh || [])) {
+  for (const a of equipeA()) {
     const cle = conf.membres[a.id]; if (!cle) continue;
     const dem = D.filter(d => d.date >= auj() && (d.statut === 'proposee' && (!d.visibleA || d.visibleA.includes(a.id)) || d.statut === 'acceptee' && d.aeshId === a.id))
       .map(d => ({ id: d.id, date: d.date, debut: d.debut, fin: d.fin, classe: d.classe || '', salle: d.salle || '', type: d.type || '', prof: d.profNom || '', statut: d.statut, positionne: !!(cand[d.id] && cand[d.id][a.id]), validee: d.statut === 'acceptee' && d.aeshId === a.id, desiste: d.statut === 'acceptee' && d.aeshId === a.id && !!cand[d.id] && cand[d.id][a.id] === false, note: d.statut === 'acceptee' && d.aeshId === a.id && d.liberee && d.date >= auj() && !(cand[d.id] && cand[d.id][a.id] === false) ? (d.note || '') : '' }));
@@ -209,7 +212,7 @@ async function api(chemin, corps) {
     if (dec === 'proposer' || dec === 'elargir') {
       const vis = dec === 'proposer' && corps.aeshIds && corps.aeshIds.length ? corps.aeshIds : null;
       await dref.update(Object.assign({ statut: 'proposee', visibleA: vis }, d.statut === 'acceptee' ? { aeshId: null, aesh: '', liberee: false, note: '' } : {})); await membresAJour(); await republier(db, cfg, {});
-      if (corps.prevenir) { const cibles = (S().aesh || []).filter(a => a.email && !(a.statut && a.statut !== 'Actif') && (!vis || vis.includes(a.id)) && !(dec === 'elargir' && d.visibleA && d.visibleA.includes(a.id)));
+      if (corps.prevenir) { const cibles = equipeA().filter(a => a.email && !(a.statut && a.statut !== 'Actif') && (!vis || vis.includes(a.id)) && !(dec === 'elargir' && d.visibleA && d.visibleA.includes(a.id)));
         mail('', 'Demande d\'accompagnement : ' + frD(d.date) + ' ' + hh(d.debut), `Bonjour,\n\nUn.e enseignant.e demande une AESH le ${libD(d)} (${d.type}).\n\nSi tu es disponible, positionne-toi dans ton lien personnel de l'équipe (rubrique « Demandes »).\n\nMerci !` + SIGNATURE, cibles.map(a => a.email).join(',')); }
       return { message: vis ? 'Proposée à ' + vis.length + ' AESH' : 'Proposée à toute l\'équipe' };
     }
@@ -250,7 +253,7 @@ window.enligneLienProfs = () => { const cfg = cfgEnLigne(); if (!cfg) return; co
   fenetre(`<h2>Lien pour les enseignant.e.s</h2><p class="small muted">Avec ce lien, un.e enseignant.e t'envoie une demande d'AESH (DS, évaluation…). Il ne donne accès à rien d'autre. Mets-le dans l'ENT ou envoie-le par mail.</p><p style="word-break:break-all"><a href="${esc(l)}" target="_blank" rel="noopener">${esc(l)}</a></p><button class="btn primary" onclick="enligneCopier('${esc(l)}',this)">Copier le lien</button> <button class="btn" onclick="enligneMailProfs()">Préparer un mail</button>`);
   window.enligneMailProfs = () => mail('', 'Demander une AESH pour un DS ou une évaluation', "Bonjour,\n\nPour demander une AESH lors d'un DS, d'une évaluation ou d'une sortie, cliquez sur ce lien et remplissez le formulaire (pas besoin de compte ni de mot de passe) :\n" + l + "\n\nMerci de ne pas écrire de nom d'élève. Je vous réponds par mail.\n\nMerci !" + SIGNATURE); };
 window.enligneLiensEquipe = async () => { const cfg = cfgEnLigne(); if (!cfg) return; let conf; try { conf = await membresAJour(); } catch (e) { return alert(e.message); }
-  const A = (S().aesh || []).slice().sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  const A = equipeA().slice().sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
   window.enligneMailAesh = (id, bouton) => { const a = A.find(x => x.id === id); if (!a) return; const l = lienPerso(cfg, conf.membres[a.id]);
     mail(a.email, 'Ton lien pour les remplacements AESH', 'Bonjour ' + a.nom.split(' ')[0] + ",\n\nVoici ton lien personnel (ne le partage pas) :\n" + l + "\n\nTu y verras les créneaux à prendre quand une collègue est absente, et les demandes d'accompagnement pour les DS. Pas besoin de compte ni de mot de passe. Ouvre-le dans Safari, puis Partager › « Sur l'écran d'accueil ».\n\nMerci !" + SIGNATURE);
     if (bouton) bouton.textContent = 'Mail ouvert'; };
