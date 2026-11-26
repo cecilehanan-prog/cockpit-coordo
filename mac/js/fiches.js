@@ -72,20 +72,35 @@ async function idFiches(code) {
   return 'f' + Array.from(h.slice(0, 16), b => b.toString(16).padStart(2, '0')).join('');
 }
 const lienEnLigne = (e, n) => PAGE_EN_LIGNE + '#e=' + encodeURIComponent(e) + (n ? '&n=' + n : '');
-let empreinte = '', publieLe = '', erreurEnLigne = '';
+// état de la dernière mise en ligne, gardé sur l'appareil (il survit au rechargement) et affiché en direct
+const K_ETAT = 'cockpit-fiches-en-ligne';
+let empreinte = '', publieLe = '', erreurEnLigne = '', verifie = false;
+try { const x = JSON.parse(localStorage.getItem(K_ETAT) || '{}'); publieLe = x.le || ''; erreurEnLigne = x.err || ''; verifie = !!x.ok; } catch (e) {}
+const noterEtat = () => { try { localStorage.setItem(K_ETAT, JSON.stringify({ le: publieLe, err: erreurEnLigne, ok: verifie })); } catch (e) {} const z = document.getElementById('fe-etat-en-ligne'); if (z) z.innerHTML = texteEtat(); };
+const avant = (p, ms, quoi) => new Promise((ok, ko) => { const t = setTimeout(() => ko(new Error(quoi + ' : pas de réponse de Firebase au bout de ' + Math.round(ms / 1000) + ' s (vérifie internet)')), ms); p.then(v => { clearTimeout(t); ok(v); }, e => { clearTimeout(t); ko(e); }); });
+function texteEtat() {
+  const d = iso => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' });
+  if (erreurEnLigne) return '<b style="color:#FF7E6E">Dernière mise à jour impossible : ' + esc(erreurEnLigne) + '</b>';
+  if (publieLe) return '<b style="color:#82D6A0">✓ Fiches en ligne' + (verifie ? ' et vérifiées' : '') + ' le ' + d(publieLe) + '.</b> Elles se remettent à jour toutes seules quand Cockpit est ouvert.';
+  return 'Pas encore mises en ligne depuis cet appareil : touche « Mettre à jour maintenant ».';
+}
 async function publierEnLigne(db, ref, force) {
   const f = etat(); if (!f.code || !ref) return false;
   const fiches = {}; elevesConcernes().forEach(e => { const c = f.codes[e.id]; if (c) fiches[c] = ficheDe(e); });
   const h = JSON.stringify([f.code, fiches]); if (!force && h === empreinte) return false;
   const genere = new Date().toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' });
-  await ref.collection('membres').doc(await idFiches(f.code)).set({ fiches: await chiffrer(f.code, { genere, fiches }), maj: new Date().toISOString() });
+  const doc = ref.collection('membres').doc(await idFiches(f.code)), bloc = await chiffrer(f.code, { genere, fiches });
+  await avant(doc.set({ fiches: bloc, maj: new Date().toISOString() }), 30000, 'Envoi des fiches');
+  // relecture depuis le serveur : on est sûr que les AESH trouveront les fiches avec ce code
+  let lu = null; try { lu = await avant(doc.get({ source: 'server' }), 20000, 'Vérification'); } catch (e) { console.warn('vérification fiches', e); }
+  verifie = !!(lu && lu.exists && lu.data().fiches === bloc);
   // ancien code d'équipe (après « Créer un nouveau code ») : son bloc est effacé
   if (f.ancienCode && f.ancienCode !== f.code) { try { await ref.collection('membres').doc(await idFiches(f.ancienCode)).delete(); delete f.ancienCode; sauver(); } catch (e) {} }
-  empreinte = h; publieLe = new Date().toISOString(); erreurEnLigne = '';
+  empreinte = h; publieLe = new Date().toISOString(); erreurEnLigne = ''; noterEtat();
   return true;
 }
 window.fichesEnLigne = {
-  publier: (db, ref, force) => publierEnLigne(db, ref, force).catch(e => { erreurEnLigne = e.message || String(e); console.warn('fiches en ligne', e); return false; }),
+  publier: (db, ref, force) => publierEnLigne(db, ref, force).catch(e => { erreurEnLigne = e.message || String(e); noterEtat(); console.warn('fiches en ligne', e); return false; }),
   lien: (e, n) => lienEnLigne(e, n)
 };
 window.fichesMettreEnLigne = async b => {
@@ -95,9 +110,10 @@ window.fichesMettreEnLigne = async b => {
     if (!(window.firebase && firebase.apps && firebase.apps.length && firebase.auth().currentUser)) throw new Error('connecte la Synchro sur cet appareil (en bas du menu)');
     const f = etat(); if (!f.code) { f.code = nouveauCode(); f.change = new Date().toISOString(); }
     attribuerCodes(); sauver();
+    if (!f.code) throw new Error("pas de code d'équipe");
     const db = firebase.firestore(); await publierEnLigne(db, db.collection('enligne').doc(s.enligne.e), true);
-    toast('Fiches en ligne à jour');
-  } catch (e) { erreurEnLigne = e.message || String(e); toast('Mise à jour impossible : ' + erreurEnLigne); }
+    toast(verifie ? 'Fiches en ligne à jour et vérifiées' : 'Fiches envoyées (vérification impossible pour l\'instant)');
+  } catch (e) { erreurEnLigne = e.message || String(e); noterEtat(); toast('Mise à jour impossible : ' + erreurEnLigne); }
   window.pageFichesAesh();
 };
 
@@ -318,7 +334,7 @@ function feGestion(f, E) {
     <p class="muted" style="margin:0 0 10px">Après le code d'équipe, l'AESH voit le <b>prénom et l'initiale du nom</b> de l'élève, sa classe, sa notification, ses AESH habituelles et les aides. Elle peut aussi choisir une classe et toucher le prénom de l'élève : plus besoin du QR code ni du classeur. Le lien « Voir la fiche » des créneaux de remplacement ouvre cette page.</p>
     <p style="margin:0 0 6px;word-break:break-all">Lien à donner à l'équipe : <a href="${esc(lien)}" target="_blank" rel="noopener">${esc(lien)}</a></p>
     <p style="margin:0 0 10px"><button class="btn sm" onclick="fichesCopier('${esc(lien)}',this)">Copier le lien</button> <button class="btn sm" onclick="fichesMettreEnLigne(this)">Mettre à jour maintenant</button></p>
-    <p class="small muted" style="margin:0">${erreurEnLigne ? '<b style="color:#FF7E6E">Dernière mise à jour impossible : ' + esc(erreurEnLigne) + '</b>' : publieLe ? 'Mise à jour le ' + date(publieLe) + '.' : 'Mise à jour toute seule toutes les 2 minutes quand Cockpit est ouvert et la Synchro connectée.'}</p>
+    <p class="small" id="fe-etat-en-ligne" style="margin:0">${texteEtat()}</p>
   </div>` : '';
   return enLigne + `<div class="card" style="margin-bottom:14px">
     <h2 style="margin-top:0">Liens NFC et page des fiches</h2>
