@@ -2847,5 +2847,24 @@ const lienSynthese = document.querySelector('#nav a[href="#/synthese"]');
 if (lienSynthese) lienSynthese.addEventListener('click', ev => { ev.preventDefault(); try { sessionStorage.setItem('cockpit-actualise', '1'); } catch (e) { } location.hash = '#/synthese'; location.reload(); });
 try { if (sessionStorage.getItem('cockpit-actualise')) { sessionStorage.removeItem('cockpit-actualise'); setTimeout(() => toast('Application actualisée'), 300); } } catch (e) { }
 if (window.__dataJustRefreshed) { save(); setTimeout(() => toast('Données mises à jour automatiquement'), 300); }
+// 26/11 : mise à jour automatique sur github.io. Le navigateur (Safari, appli sur l'écran d'accueil) peut garder l'ancienne page
+// jusqu'à 10 min, ou simplement « réveiller » l'appli sans la recharger : on relit index.html sans cache à l'ouverture et au retour sur l'appli ;
+// si le code a changé, on recharge une seule fois avec une adresse neuve (les données restent dans le navigateur).
+(function majAuto() {
+  if (window.COCKPIT_CODE_SOURCE || !/^https?:$/.test(location.protocol)) return; // appli Mac : le code est déjà pris sans cache
+  const moi = [...document.scripts].map(x => x.getAttribute('src') || '').find(x => /(^|\/)js\/app\.js\?v=/.test(x));
+  const vMoi = moi && (moi.match(/app\.js\?v=([\w.-]+)/) || [])[1]; if (!vMoi) return;
+  let enCours = false;
+  const verifier = () => { if (enCours || document.hidden) return; enCours = true;
+    fetch('index.html?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.text() : '').then(t => {
+      const v = (t.match(/js\/app\.js\?v=([\w.-]+)/) || [])[1]; if (!v || v === vMoi) return;
+      let deja = ''; try { deja = sessionStorage.getItem('cockpit-maj-auto') || ''; } catch (e) { }
+      if (deja === v) return; // déjà essayé pour cette version : pas de boucle
+      try { sessionStorage.setItem('cockpit-maj-auto', v); sessionStorage.setItem('cockpit-actualise', '1'); } catch (e) { }
+      location.replace(location.pathname.replace(/[^/]*$/, '') + '?maj=' + v + (location.hash || ''));
+    }).catch(() => { }).finally(() => { enCours = false; }); };
+  setTimeout(verifier, 2500);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) verifier(); });
+})();
 window.PAS = { get state() { return S; }, save, render, numeroter: () => numeroterFiches(S), ficheConcernee: e => ficheConcernee(S, e), quinzaineDe, dureeUnique, chevauchements, apercu: apercuEleve, libDisp, sansNomEleve, ppsSummary };
 })();
