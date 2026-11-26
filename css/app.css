@@ -380,3 +380,4 @@ nav a .lib{min-width:0}nav a .lib .pill{margin-left:3px;vertical-align:1px;font-
 .kpi .rep span{display:flex;flex-direction:column;align-items:flex-start;padding:3px 5px 3px 6px;border-radius:6px;font-size:10.5px;color:var(--muted);line-height:1.2;border-left:3px solid;background:#F5F7FA}
 .kpi .rep b{font-size:15px;color:var(--ink,#1F2937);font-variant-numeric:tabular-nums;white-space:nowrap}
 .kpi .rep .rep-o{border-color:#C2477D}.kpi .rep .rep-u{border-color:#3BA7D9}.kpi .rep .rep-s{border-color:#8B5A2B}
+.tt-types th,.tt-types td{white-space:nowrap;font-size:12px;padding:4px 5px}
