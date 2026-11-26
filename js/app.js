@@ -103,7 +103,7 @@ function essMessages(lundi) {
   }).sort((x, y) => x.a.nom.localeCompare(y.a.nom, 'fr'));
 }
 const essDus = () => { const c = essCible(); if (!c.declenche && !essDeLaSemaine(c.lundi).some(e => essMoment(e) >= new Date())) return { c, n: 0, msgs: [] }; const msgs = essMessages(c.lundi).filter(m => m.etat !== 'envoye' && !absente(m.a) || false); return { c, n: msgs.length, msgs }; };
-window.essCopier = (lundi, aid) => { const m = essMessages(lundi).find(x => x.a.id === aid); if (!m) return; navigator.clipboard.writeText(m.corps).then(() => toast('Message copié : à coller dans Pronote')); };
+window.essCopier = (lundi, aid) => { const m = essMessages(lundi).find(x => x.a.id === aid); if (!m) return; copier(m.corps, 'Message copié : à coller dans Pronote'); };
 window.essMarquer = (lundi, aid, oui) => { const m = essMessages(lundi).find(x => x.a.id === aid); if (!m) return; S.essRappels[lundi] = S.essRappels[lundi] || {}; if (oui) S.essRappels[lundi][aid] = { le: new Date().toISOString(), sig: m.sig }; else delete S.essRappels[lundi][aid]; commit('ess', `Rappel d'ESS ${oui ? 'envoyé à' : 'remis à envoyer pour'} ${m.a.nom} (semaine du ${frDate(lundi)})`); };
 // ouvre un brouillon par AESH dans la messagerie du Mac (adresse académique du destinataire déjà remplie) ; un clic sur « Envoyer » dans la messagerie
 window.essMailTous = async lundi => {
@@ -798,6 +798,10 @@ function boite({ texte, ok = 'OK', annuler = 'Annuler', danger = false, champ = 
 const demander = (texte, o = {}) => boite({ texte, ...o });
 const saisir = (texte, defaut = '', o = {}) => boite({ texte, champ: { defaut }, ...o });
 window.demander = demander; window.saisir = saisir; window.toast = toast;
+// 26/11 : copie qui marche partout. Si le presse-papiers est refusé (Safari, appli installée), le texte s'affiche sélectionné à copier à la main (avant : le bouton « Copier » ne faisait rien).
+const copier = (t, ok = 'Copié') => { t = String(t ?? ''); const secours = () => { let fait = false; try { const z = document.createElement('textarea'); z.value = t; z.setAttribute('readonly', ''); z.style.cssText = 'position:fixed;top:0;left:0;opacity:0'; document.body.appendChild(z); z.select(); fait = document.execCommand('copy'); z.remove(); } catch (e) { } if (fait) toast(ok); else saisir('Copie ce texte (déjà sélectionné) :', t, { ok: 'Fermer', annuler: null }); };
+  try { if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(() => toast(ok), secours); } catch (e) { } secours(); return Promise.resolve(); };
+window.copier = copier;
 window.alert = m => { boite({ texte: String(m ?? ''), annuler: null }); };
 const dl = (name, content, type = 'application/json') => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 500); };
 const isPending = e => /^Dossier|^Renouvellement|^Vigilance/.test(e.statut);
@@ -1265,7 +1269,7 @@ window.prevenirEquipe = aid => {
   const m = messageEquipe(aid), href = `mailto:?bcc=${encodeURIComponent(m.bcc)}&subject=${encodeURIComponent(m.sujet)}&body=${encodeURIComponent(m.corps)}`;
   modal(`<h2>Prévenir l'équipe</h2><p class="small muted" style="margin-top:0">Message prêt à envoyer à toute l'équipe en copie cachée (${m.bcc.split(',').filter(Boolean).length} adresses académiques). Il ne contient aucun nom d'élève.</p>
     <label class="f wide">Objet<input type="text" value="${esc(m.sujet)}" readonly></label><label class="f wide">Message<textarea rows="12" readonly>${esc(m.corps)}</textarea></label>
-    <div class="toolbar" style="margin-top:10px"><a class="btn primary" href="${href}">Ouvrir dans ma messagerie</a><button type="button" class="btn" onclick="navigator.clipboard.writeText(document.querySelector('#modal textarea').value).then(() => toast('Message copié'))">Copier le message</button></div>`, () => { });
+    <div class="toolbar" style="margin-top:10px"><a class="btn primary" href="${href}">Ouvrir dans ma messagerie</a><button type="button" class="btn" onclick="copier(document.querySelector('#modal textarea').value, 'Message copié')">Copier le message</button></div>`, () => { });
 };
 // occurrences datées à venir d'un créneau hebdomadaire (jamais le passé : rien ne peut être pris après coup)
 function occurrencesAVenir(cr, fin, nbSem = 8) {
@@ -1370,7 +1374,7 @@ function majTitreEtBadge() {
   document.title = (tot ? `(${tot}) ` : '') + 'Cockpit Coordo — suivi AESH'; const bm = document.getElementById('bb-menu'); if (bm) { bm.textContent = tot; bm.hidden = !tot; } try { if (navigator.setAppBadge) tot ? navigator.setAppBadge(tot) : navigator.clearAppBadge(); } catch (x) { }
 }
 /* ====================== QUESTIONS À POSER (réunions) ====================== */
-window.questionAjouter = () => { const t = ($('#q-texte').value || '').trim(); if (!t) return; S.questions.unshift({ id: uid('q'), texte: t, pour: ($('#q-pour').value || '').trim(), lien: '', creeLe: aujourdhui(), fait: false, reponse: '' }); commit('question', 'Question ajoutée : ' + t.slice(0, 60)); };
+window.questionAjouter = () => { const t = ($('#q-texte').value || '').trim(); if (!t) { toast('Écris d\'abord la question'); $('#q-texte').focus(); return; } S.questions.unshift({ id: uid('q'), texte: t, pour: ($('#q-pour').value || '').trim(), lien: '', creeLe: aujourdhui(), fait: false, reponse: '' }); commit('question', 'Question ajoutée : ' + t.slice(0, 60)); };
 window.questionBascule = (id, v) => { const q = S.questions.find(x => x.id === id); if (!q) return; q.fait = !!v; commit('question', (v ? 'Question posée : ' : 'Question remise à poser : ') + q.texte.slice(0, 50)); };
 window.questionReponse = (id, v) => { const q = S.questions.find(x => x.id === id); if (!q) return; q.reponse = v.trim(); commit('question', 'Réponse notée : ' + q.texte.slice(0, 50)); };
 window.questionSupprimer = async id => { if (!(await demander('Supprimer cette question ?', { ok: 'Supprimer', danger: true }))) return; const q = S.questions.find(x => x.id === id); if (!q) return; S.questions = S.questions.filter(x => x.id !== id); commit('question', 'Question supprimée : ' + q.texte.slice(0, 50)); };
@@ -1648,6 +1652,8 @@ function rendre() {
   (routes[name] || pageSynthese)();
   bandeauEss(); page.scrollTop = 0; allerCible();
 }
+// 26/11 : changer de page (bouton Retour, menu) ferme la fenêtre ouverte, qui sinon restait affichée par-dessus la nouvelle page
+window.addEventListener('hashchange', () => { const m = document.getElementById('modal'); if (m && m.innerHTML) closeModal(); const r = document.getElementById('recherche-eleve'); if (r) r.remove(); });
 window.addEventListener('hashchange', render);
 function setTitle(t, actions = '') { $('#title').textContent = t; $('#topactions').innerHTML = actions; }
 

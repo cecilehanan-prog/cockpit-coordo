@@ -36,6 +36,18 @@ const MEM = 'equipe-aesh-envoyes-' + CLE;
 let moi = null, prises = {}, envoyes = {}; try { envoyes = JSON.parse(localStorage.getItem(MEM)) || {}; } catch (e) {}
 const garder = () => { try { localStorage.setItem(MEM, JSON.stringify(envoyes)); } catch (e) {} };
 let db, R;
+// 26/11 : messages et confirmations DANS la page (alert/confirm du navigateur bloqués dans une appli installée : le bouton semblait ne rien faire)
+function boite(texte, ok = 'OK', annuler = null) {
+  return new Promise(fin => {
+    const w = document.createElement('div'); w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px';
+    w.innerHTML = '<div class="carte" role="alertdialog" style="max-width:420px;width:100%;margin:0"><div class="boite-texte" style="white-space:pre-line"></div><div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">' + (annuler ? '<button type="button" class="second" data-r="0"></button>' : '') + '<button type="button" data-r="1"></button></div></div>';
+    w.querySelector('.boite-texte').textContent = texte; w.querySelector('[data-r="1"]').textContent = ok; if (annuler) w.querySelector('[data-r="0"]').textContent = annuler;
+    w.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { w.remove(); fin(b.dataset.r === '1'); });
+    document.body.appendChild(w); w.querySelector('[data-r="1"]').focus();
+  });
+}
+window.alert = m => { boite(String(m == null ? '' : m)); };
+const confirmer = (texte, ok) => boite(texte, ok, 'Annuler');
 
 function lundi(iso) { const d = new Date(iso + 'T12:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; }
 function occupee(date, debut, fin) {
@@ -81,7 +93,7 @@ function afficher() {
 async function agir(type, occId) {
   const c = (moi.creneaux || []).find(x => x.id === occId); if (!c) return;
   if (type === 'annule' && verrou(c.date, c.debut)) { alert('Moins de 4 heures avant le cours : appelle la coordinatrice.'); return; }
-  if (type === 'annule' && !confirm('Tu ne peux plus prendre ce créneau ? Il redevient libre pour les collègues.')) return;
+  if (type === 'annule' && !(await confirmer('Tu ne peux plus prendre ce créneau ? Il redevient libre pour les collègues.', 'Libérer le créneau'))) return;
   const rRef = R.collection('reponses').doc(), pRef = R.collection('prises').doc(occId), le = horodatage();
   const b = db.batch();
   b.set(rRef, { p: CLE, aeshId: moi.aeshId, type, occId, creneauId: c.creneauId, date: c.date, debut: c.debut, fin: c.fin, le });
@@ -92,7 +104,7 @@ async function agir(type, occId) {
 async function candidat(type, demandeId) {
   const dv = (moi.demandes || []).find(x => x.id === demandeId) || {};
   if (type === 'retrait' && dv.validee && verrou(dv.date, dv.debut)) { alert('Moins de 4 heures avant le cours : appelle la coordinatrice.'); return; }
-  if (type === 'retrait' && dv.validee && !confirm('Tu ne peux plus venir ? La coordinatrice sera prévenue pour trouver une autre AESH.')) return;
+  if (type === 'retrait' && dv.validee && !(await confirmer('Tu ne peux plus venir ? La coordinatrice sera prévenue pour trouver une autre AESH.', 'Je ne peux plus venir'))) return;
   try { await R.collection('reponses').add({ p: CLE, aeshId: moi.aeshId, type, demandeId, le: horodatage() }); envoyes['d' + demandeId] = type; garder(); afficher(); }
   catch (e) { alert("Ça n'a pas marché. Vérifie ta connexion internet."); }
 }

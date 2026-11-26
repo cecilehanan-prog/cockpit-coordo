@@ -12,6 +12,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--primary)}
 h1{font-size:22px;font-weight:650;margin:0;letter-spacing:-.01em}
 h2{font-size:15px;font-weight:650;margin:0 0 10px}
+.card>h2{display:flow-root} /* 26/11 : les boutons à droite d'un titre (ex. « + Créneau » de l'EDT AESH) ne passent plus sous le contenu quand la carte est étroite */
 h3{font-size:13px;font-weight:650;margin:0 0 6px;color:var(--muted)}
 .muted{color:var(--muted)}
 .small{font-size:12px}

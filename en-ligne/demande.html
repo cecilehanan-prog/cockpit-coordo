@@ -20,6 +20,10 @@ button:disabled{opacity:.6}.gris{color:var(--gris);font-size:14px}.err{color:var
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
+// 26/11 : messages DANS la page (alert du navigateur bloqué dans une appli installée)
+window.alert = m => { const w = document.createElement('div'); w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px';
+  w.innerHTML = '<div class="carte" role="alertdialog" style="max-width:420px;width:100%;margin:0"><div class="boite-texte" style="white-space:pre-line"></div><button type="button">OK</button></div>';
+  w.querySelector('.boite-texte').textContent = String(m == null ? '' : m); const b = w.querySelector('button'); b.onclick = () => w.remove(); document.body.appendChild(w); b.focus(); };
 const M = document.getElementById('m'), P = new URLSearchParams(location.hash.slice(1));
 const E = P.get('e'), K = P.get('k'), MEM = 'demande-aesh-prof';
 const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
