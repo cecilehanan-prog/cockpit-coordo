@@ -84,18 +84,29 @@ function texteEtat() {
   if (publieLe) return '<b style="color:#82D6A0">✓ Fiches en ligne' + (verifie ? ' et vérifiées' : '') + ' le ' + d(publieLe) + '.</b> Elles se remettent à jour toutes seules quand Cockpit est ouvert.';
   return 'Pas encore mises en ligne depuis cet appareil : touche « Mettre à jour maintenant ».';
 }
+// 26/11 soir : envoi par l'API REST de Firestore (avec le jeton de la Synchro) au lieu du canal du SDK,
+// qui restait sans réponse chez Hanan (« pas de réponse de Firebase au bout de 30 s »). Mêmes règles de sécurité.
+function urlDoc(chemin) { const c = window.COCKPIT_FIREBASE || {}; return 'https://firestore.googleapis.com/v1/projects/' + c.projectId + '/databases/(default)/documents/' + chemin + '?key=' + c.apiKey; }
+async function rest(methode, chemin, champs) {
+  const u = window.firebase && firebase.auth && firebase.auth().currentUser; if (!u) throw new Error('connecte la Synchro sur cet appareil (en bas du menu)');
+  const jeton = await avant(u.getIdToken(), 20000, 'Connexion à Firebase');
+  const opt = { method: methode, headers: { Authorization: 'Bearer ' + jeton } };
+  if (champs) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify({ fields: Object.fromEntries(Object.entries(champs).map(([k, v]) => [k, { stringValue: String(v) }])) }); }
+  const r = await avant(fetch(urlDoc(chemin), opt), 30000, 'Envoi des fiches');
+  if (!r.ok && !(methode === 'DELETE' && r.status === 404)) { let m = ''; try { m = (await r.json()).error.message; } catch (e) {} if (r.status === 429) throw new Error("limite gratuite de Firebase atteinte pour aujourd'hui (trop d'enregistrements). Réessaie demain après 9 h"); throw new Error('Firebase a refusé (' + r.status + (m ? ' : ' + m : '') + ')'); }
+  return r;
+}
 async function publierEnLigne(db, ref, force) {
   const f = etat(); if (!f.code || !ref) return false;
   const fiches = {}; elevesConcernes().forEach(e => { const c = f.codes[e.id]; if (c) fiches[c] = ficheDe(e); });
   const h = JSON.stringify([f.code, fiches]); if (!force && h === empreinte) return false;
   const genere = new Date().toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' });
-  const doc = ref.collection('membres').doc(await idFiches(f.code)), bloc = await chiffrer(f.code, { genere, fiches });
-  await avant(doc.set({ fiches: bloc, maj: new Date().toISOString() }), 30000, 'Envoi des fiches');
-  // relecture depuis le serveur : on est sûr que les AESH trouveront les fiches avec ce code
-  let lu = null; try { lu = await avant(doc.get({ source: 'server' }), 20000, 'Vérification'); } catch (e) { console.warn('vérification fiches', e); }
-  verifie = !!(lu && lu.exists && lu.data().fiches === bloc);
+  const chemin = 'enligne/' + ref.id + '/membres/' + await idFiches(f.code), bloc = await chiffrer(f.code, { genere, fiches });
+  await rest('PATCH', chemin, { fiches: bloc, maj: new Date().toISOString() });
+  // relecture comme la fera le téléphone d'une AESH (sans compte) : on est sûr qu'elle trouvera les fiches avec ce code
+  verifie = false; try { const r = await avant(fetch(urlDoc(chemin), { cache: 'no-store' }), 20000, 'Vérification'); verifie = r.ok && (((await r.json()).fields || {}).fiches || {}).stringValue === bloc; } catch (e) { console.warn('vérification fiches', e); }
   // ancien code d'équipe (après « Créer un nouveau code ») : son bloc est effacé
-  if (f.ancienCode && f.ancienCode !== f.code) { try { await ref.collection('membres').doc(await idFiches(f.ancienCode)).delete(); delete f.ancienCode; sauver(); } catch (e) {} }
+  if (f.ancienCode && f.ancienCode !== f.code) { try { await rest('DELETE', 'enligne/' + ref.id + '/membres/' + await idFiches(f.ancienCode)); delete f.ancienCode; sauver(); } catch (e) {} }
   empreinte = h; publieLe = new Date().toISOString(); erreurEnLigne = ''; noterEtat();
   return true;
 }
