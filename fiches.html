@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Fiches élèves</title><meta name="theme-color" content="#37667F">
+<meta name="apple-mobile-web-app-title" content="Fiches élèves">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png"><link rel="icon" type="image/png" href="icons/icone-32.png">
+<!-- Fiches élèves AESH (26/11/2026). Aucune donnée dans ce fichier : les fiches sont rangées CHIFFRÉES dans l'appli en ligne
+     (Firestore enligne/{e}/membres/{empreinte du code d'équipe}). Sans le code d'équipe, on ne peut ni les trouver ni les lire.
+     Cockpit les met à jour tout seul (fiches.js). Prénom + initiale du nom seulement, jamais de diagnostic. -->
+<style>
+:root{--bleu:#37667F;--fond:#F3F6F8;--texte:#1F2A33;--gris:#5C6B77;--ligne:#D5DDE3;--carte:#fff;--puce:#E8EEF2;--err:#C0392B;--lien:#37667F}
+@media (prefers-color-scheme:dark){:root{--fond:#12181D;--texte:#E7EDF1;--gris:#9DAAB4;--ligne:#2A353D;--carte:#1A2228;--puce:#24303A;--err:#F07B6E;--lien:#7FB2CF}}
+*{box-sizing:border-box}body{margin:0;background:var(--fond);color:var(--texte);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{background:var(--bleu);color:#fff;padding:14px 16px;font-weight:650;font-size:17px;position:sticky;top:0;z-index:2}
+main{max-width:600px;margin:0 auto;padding:16px}
+.carte{background:var(--carte);border:1px solid var(--ligne);border-radius:14px;padding:14px 16px;margin-bottom:12px}
+h1{font-size:26px;margin:0 0 2px;line-height:1.2}h2{font-size:13px;margin:0 0 6px;color:var(--gris);text-transform:uppercase;letter-spacing:.04em}
+.gris{color:var(--gris);font-size:14px}.err{color:var(--err);font-weight:600}
+ul{margin:0;padding-left:20px}li{margin:3px 0}
+input{width:100%;font:inherit;font-size:17px;padding:12px;border:1px solid var(--ligne);border-radius:10px;background:var(--carte);color:var(--texte)}
+button{font:inherit;cursor:pointer}
+.btn{width:100%;margin-top:10px;font-size:17px;padding:12px;border:0;border-radius:10px;background:var(--bleu);color:#fff;font-weight:600}
+.lien{background:none;border:0;color:var(--lien);padding:6px 0;font-size:15px;font-weight:600}
+.classes{display:flex;flex-wrap:wrap;gap:8px}
+.cl{border:1px solid var(--ligne);background:var(--carte);color:var(--texte);border-radius:999px;padding:9px 15px;font-size:16px;font-weight:600}
+.cl.on{background:var(--bleu);border-color:var(--bleu);color:#fff}
+.el{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;border:1px solid var(--ligne);background:var(--carte);color:var(--texte);border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.el b{font-size:18px}.el span{color:var(--gris);font-size:14px;white-space:nowrap}
+.voisins{display:flex;flex-wrap:wrap;gap:8px}
+.vs{border:1px solid var(--ligne);background:var(--puce);color:var(--texte);border-radius:10px;padding:10px 14px;font-size:16px;font-weight:600}
+.num{display:flex;gap:8px}.num input{flex:1}.num button{width:auto;margin:0;padding:0 18px}
+</style></head><body><header id="h">Fiches élèves</header><main id="m"><div class="carte gris">Chargement…</div></main>
+<script src="js/sync-config.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+const ITER = 250000, K_CODE = 'fiches-code-equipe', K_ESP = 'fiches-espace', M = document.getElementById('m');
+const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const lire = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+const garder = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} };
+const unb = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const params = () => new URLSearchParams(location.hash.slice(1));
+let ESP = params().get('e') || lire(K_ESP), D = null, classeChoisie = '', recherche = '';
+if (params().get('e')) garder(K_ESP, params().get('e'));
+
+async function idFiches(code) {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('fiches-cockpit:' + code.trim().toLowerCase())));
+  return 'f' + Array.from(h.slice(0, 16), b => b.toString(16).padStart(2, '0')).join('');
+}
+async function dechiffrer(code, bloc) {
+  const [sel, iv, ct] = bloc.split('.').map(unb);
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(code.trim().toLowerCase()), 'PBKDF2', false, ['deriveKey']);
+  const cle = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: sel, iterations: ITER, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, cle, ct)));
+}
+// le bloc chiffré est gardé sur le téléphone : la fiche s'ouvre même avec un mauvais réseau en classe
+async function chercherBloc(id) {
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(window.COCKPIT_FIREBASE);
+    const s = await firebase.firestore().collection('enligne').doc(ESP).collection('membres').doc(id).get();
+    if (!s.exists || !s.data().fiches) return { absent: true };
+    garder('fiches-bloc-' + id, s.data().fiches); return { bloc: s.data().fiches };
+  } catch (e) { const b = lire('fiches-bloc-' + id); return b ? { bloc: b, horsLigne: true } : { erreur: true }; }
+}
+let horsLigne = false;
+async function essayer(code, nouveau) {
+  M.innerHTML = '<div class="carte gris">Ouverture des fiches…</div>';
+  const id = await idFiches(code), r = await chercherBloc(id);
+  if (r.erreur) return demanderCode('Pas de connexion internet. Réessaie dans un instant.', code);
+  if (r.absent) { garder(K_CODE, ''); return demanderCode(nouveau ? 'Ce code ne marche pas. Vérifie-le auprès de la coordinatrice.' : 'Le code d\'équipe a changé. Tape le nouveau code.'); }
+  try { D = await dechiffrer(code, r.bloc); } catch (e) { garder(K_CODE, ''); return demanderCode('Ce code ne marche pas. Vérifie-le auprès de la coordinatrice.'); }
+  horsLigne = !!r.horsLigne; garder(K_CODE, code); afficher();
+}
+function demanderCode(msg, valeur) {
+  M.innerHTML = '<div class="carte"><h1>Code d\'équipe</h1><p class="gris">Tape le code donné par la coordinatrice (par exemple mot-mot-mot-123). Ce téléphone s\'en souviendra.</p>' + (msg ? '<p class="err">' + esc(msg) + '</p>' : '')
+    + '<input id="c" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="mot-mot-mot-123" value="' + esc(valeur || '') + '"><button class="btn" id="ok">Ouvrir</button></div>';
+  const go = () => { const v = document.getElementById('c').value.trim(); if (v) essayer(v, true); };
+  document.getElementById('ok').onclick = go; document.getElementById('c').onkeydown = e => { if (e.key === 'Enter') go(); };
+}
+const nomEl = f => esc(f.prenom ? f.prenom + ' ' + (f.ini || '') : 'Élève');
+const allerA = n => { location.hash = 'e=' + encodeURIComponent(ESP) + (n ? '&n=' + n : ''); };
+const liste = () => Object.entries(D.fiches).map(([n, f]) => Object.assign({ n }, f));
+const parPrenom = (a, b) => String(a.prenom).localeCompare(String(b.prenom), 'fr', { sensitivity: 'base' }) || String(a.ini).localeCompare(String(b.ini), 'fr');
+const pied = () => '<p class="gris" style="text-align:center;margin-top:18px">Fiches mises à jour le ' + esc(D.genere) + (horsLigne ? ' · <b>hors connexion</b> (dernière version gardée sur ce téléphone)' : '') + '</p>'
+  + '<p style="text-align:center"><button class="lien" id="oubli">Changer de code d\'équipe</button></p>';
+const brancherPied = () => { const b = document.getElementById('oubli'); if (b) b.onclick = () => { garder(K_CODE, ''); D = null; demanderCode(''); }; };
+const boutonEl = f => '<button class="el" data-n="' + esc(f.n) + '"><b>' + nomEl(f) + '</b><span>' + esc(f.classe) + ' · n° ' + esc(f.n) + '</span></button>';
+const brancherEls = () => M.querySelectorAll('[data-n]').forEach(b => { b.onclick = () => allerA(b.dataset.n); });
+
+function afficher() {
+  if (!D) return;
+  const n = (params().get('n') || '').replace(/\D/g, '').slice(0, 4);
+  if (n && D.fiches[n]) return fiche(n, D.fiches[n]);
+  accueil(n ? 'Aucune fiche avec le numéro ' + n + '.' : '');
+}
+function accueil(msg) {
+  document.getElementById('h').textContent = 'Fiches élèves';
+  const L = liste(), classes = [...new Set(L.map(f => f.classe).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
+  M.innerHTML = (msg ? '<div class="carte err">' + esc(msg) + '</div>' : '')
+    + '<div class="carte"><h2>Chercher un élève</h2><input id="q" type="search" placeholder="Prénom, classe ou numéro" value="' + esc(recherche) + '" autocomplete="off"></div>'
+    + '<div id="res"></div>'
+    + '<div class="carte" id="blocClasses"><h2>Ou choisis la classe</h2><div class="classes">' + classes.map(c => '<button class="cl' + (c === classeChoisie ? ' on' : '') + '" data-c="' + esc(c) + '">' + esc(c) + '</button>').join('') + '</div></div>'
+    + '<div id="elevesClasse"></div>' + pied();
+  const res = document.getElementById('res'), q = document.getElementById('q');
+  const majRes = () => {
+    recherche = q.value; const t = norm(q.value);
+    if (!t) { res.innerHTML = ''; return; }
+    const R = L.filter(f => norm(f.prenom + ' ' + f.ini).includes(t) || norm(f.classe).replace(/\s/g, '').includes(t.replace(/\s/g, '')) || f.n.startsWith(t)).sort(parPrenom);
+    res.innerHTML = '<div class="carte">' + (R.length ? R.map(boutonEl).join('') : '<p class="gris" style="margin:0">Aucun élève trouvé.</p>') + '</div>'; brancherEls();
+  };
+  const majClasse = () => {
+    const z = document.getElementById('elevesClasse');
+    M.querySelectorAll('[data-c]').forEach(b => b.classList.toggle('on', b.dataset.c === classeChoisie));
+    z.innerHTML = classeChoisie ? '<div class="carte"><h2>Élèves suivis en ' + esc(classeChoisie) + '</h2>' + L.filter(f => f.classe === classeChoisie).sort(parPrenom).map(boutonEl).join('') + '</div>' : ''; brancherEls();
+  };
+  q.oninput = majRes; M.querySelectorAll('[data-c]').forEach(b => { b.onclick = () => { classeChoisie = classeChoisie === b.dataset.c ? '' : b.dataset.c; majClasse(); if (classeChoisie) document.getElementById('elevesClasse').scrollIntoView({ behavior: 'smooth', block: 'start' }); }; });
+  majRes(); majClasse(); brancherPied();
+}
+function fiche(n, f) {
+  document.getElementById('h').textContent = 'Fiche élève';
+  const voisins = liste().filter(x => x.n !== n && x.classe && x.classe === f.classe).sort(parPrenom);
+  M.innerHTML = '<button class="lien" id="retour">‹ Toutes les fiches</button>'
+    + '<div class="carte"><h1>' + nomEl(f) + '</h1><div style="font-size:18px">Classe ' + esc(f.classe) + (f.disp ? ' · ' + esc(f.disp) : '') + '</div><div class="gris">' + (f.site ? esc(f.site) + ' · ' : '') + 'fiche n° ' + esc(n) + '</div></div>'
+    + '<div class="carte"><h2>Notification</h2><div>' + esc(f.notif || f.acc) + '</div></div>'
+    + (f.aesh && f.aesh.length ? '<div class="carte"><h2>AESH habituelle' + (f.aesh.length > 1 ? 's' : '') + '</h2><div>' + f.aesh.map(esc).join(', ') + '</div></div>' : '')
+    + '<div class="carte"><h2>Aides à mettre en place</h2>' + (f.aides && f.aides.length ? '<ul>' + f.aides.map(a => '<li>' + esc(a) + '</li>').join('') + '</ul>' : '<p class="gris" style="margin:0">Demande à la coordinatrice ou au professeur.</p>') + '</div>'
+    + (voisins.length ? '<div class="carte"><h2>Aussi suivi' + (voisins.length > 1 ? 's' : '') + ' dans cette classe</h2><div class="voisins">' + voisins.map(v => '<button class="vs" data-n="' + esc(v.n) + '">' + nomEl(v) + '</button>').join('') + '</div></div>' : '')
+    + pied();
+  document.getElementById('retour').onclick = () => { classeChoisie = f.classe || ''; allerA(''); };
+  brancherEls(); brancherPied(); window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', () => { const e = params().get('e'); if (e && e !== ESP) { ESP = e; garder(K_ESP, e); D = null; const c = lire(K_CODE); return c ? essayer(c, false) : demanderCode(''); } afficher(); });
+if (!ESP) M.innerHTML = '<div class="carte"><h1>Fiches élèves</h1><p>Ouvre cette page avec le lien donné par la coordinatrice, ou avec « Voir la fiche de l\'élève » dans ton lien de remplacement.</p></div>';
+else { const c = lire(K_CODE); if (c) essayer(c, false); else demanderCode(''); }
+</script></body></html>

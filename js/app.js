@@ -2692,7 +2692,7 @@ function liensAbsence(ab) {
 window.supprimerPriseOcc = occId => window.retirerPriseOcc(occId);
 // la coordination garde la main : retirer un remplacement pris en ligne (la collègue ne vient pas) ou mettre quelqu'un d'autre
 const libPrise = p => `${frDate(p.date)} ${hh(p.debut)}–${hh(p.fin)}`;
-const numEleveCr = cr => { const e = cr && eleve(cr.eleveId), f = S.fiches || {}; return e && f.codes && f.codes[e.id] ? 'élève n° ' + f.codes[e.id] : ''; };
+const numEleveCr = cr => { const e = cr && eleve(cr.eleveId), f = S.fiches || {}; return e && f.codes && f.codes[e.id] ? 'élève n° ' + f.codes[e.id] + (e.prenom ? ' (' + String(e.prenom).trim() + ')' : '') : ''; }; // 26/11 : prénom ajouté (mail entre collègues)
 // fenêtre d'information dans la page (les fenêtres alert/confirm du navigateur peuvent être bloquées, par ex. dans Safari : le bouton semblait alors ne rien faire)
 function infoModal(titre, texte) { modal(`<h2>${esc(titre)}</h2><p style="white-space:pre-line">${esc(texte)}</p>`, () => { }); $('#m-ok').textContent = 'OK'; const an = $('#mform .acts .btn:not(.primary)'); if (an) an.remove(); }
 // Le cockpit change tout de suite (la coordination décide) ; le créneau est libéré dans l'appli de l'équipe, avec nouvel essai automatique si ça échoue.

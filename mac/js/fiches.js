@@ -44,11 +44,62 @@ function attribuerCodes() {
   return Object.keys(f.codes).length - avant;
 }
 
+// 26/11 : prénom + initiale du nom, pour savoir qui est qui quand on remplace (lisible seulement avec le code d'équipe)
+const initiale = n => { const m = String(n || '').trim().match(/[A-Za-zÀ-ÖØ-öø-ÿ]/); return m ? m[0].toUpperCase() + '.' : ''; };
+const frDate = iso => iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : '';
+const hNotif = h => { const n = Number(h); if (!n) return ''; const e = Math.floor(n), m = Math.round((n - e) * 60); return e + ' h' + (m ? String(m).padStart(2, '0') : ''); };
+function notifDe(e) {
+  const st = e.statut || '', acc = e.type === 'Individuel' ? 'individuel' : 'mutualisé';
+  if (st === 'Notifié') return 'Notification MDPH : accompagnement ' + acc + (e.type === 'Individuel' && hNotif(e.heures) ? ', ' + hNotif(e.heures) + ' par semaine' : '') + (e.notifFin ? ' (jusqu\'au ' + frDate(e.notifFin) + ')' : '');
+  if (/renouvellement/i.test(st)) return 'Renouvellement demandé (dossier déposé) : accompagnement ' + acc + ' en attendant la réponse';
+  if (/1ère demande/i.test(st)) return 'Première demande déposée : en attente de notification';
+  return st ? st + ' : accompagnement ' + acc : 'Accompagnement ' + acc;
+}
 function ficheDe(e) {
   const s = S(), pas = P(), ap = pas.apercu ? pas.apercu(e) : { accompagnement: e.type === 'Individuel' ? 'Accompagnement individuel' : 'Accompagnement mutualisé', aides: [] };
-  // pas d'emploi du temps dans la fiche (décision du 08/11) : classe, accompagnement et aides seulement
-  return { classe: e.classe || '', site: e.site || '', disp: pas.libDisp ? pas.libDisp(e) : '', acc: ap.accompagnement, aides: ap.aides || [] };
+  const aesh = [...new Set((s.affectations || []).filter(x => x.eleveId === e.id && x.heures > 0).map(x => String(((s.aesh || []).find(a => a.id === x.aeshId) || {}).nom || '').split(' ')[0]).filter(Boolean))];
+  // pas d'emploi du temps dans la fiche (décision du 08/11) : classe, accompagnement et aides ; ni diagnostic ni santé
+  return { prenom: String(e.prenom || '').trim(), ini: initiale(e.nom), classe: e.classe || '', site: e.site || '', disp: pas.libDisp ? pas.libDisp(e) : '', acc: ap.accompagnement, notif: notifDe(e), aesh, aides: ap.aides || [] };
 }
+
+/* ---------- 26/11 : fiches en ligne (page fiches.html sur github.io), mises à jour toutes seules ----------
+   Le bloc chiffré avec le code d'équipe est rangé dans l'espace de l'appli en ligne (Firestore enligne/{e}/membres/{id}),
+   id = empreinte du code d'équipe : sans le code, on ne peut ni trouver ni lire les fiches. Cockpit le remet à jour
+   à chaque vérification de l'appli en ligne (toutes les 2 minutes quand Cockpit est ouvert), seulement s'il a changé. */
+const PAGE_EN_LIGNE = 'https://cecilehanan-prog.github.io/cockpit-coordo/fiches.html';
+async function idFiches(code) {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('fiches-cockpit:' + String(code).trim().toLowerCase())));
+  return 'f' + Array.from(h.slice(0, 16), b => b.toString(16).padStart(2, '0')).join('');
+}
+const lienEnLigne = (e, n) => PAGE_EN_LIGNE + '#e=' + encodeURIComponent(e) + (n ? '&n=' + n : '');
+let empreinte = '', publieLe = '', erreurEnLigne = '';
+async function publierEnLigne(db, ref, force) {
+  const f = etat(); if (!f.code || !ref) return false;
+  const fiches = {}; elevesConcernes().forEach(e => { const c = f.codes[e.id]; if (c) fiches[c] = ficheDe(e); });
+  const h = JSON.stringify([f.code, fiches]); if (!force && h === empreinte) return false;
+  const genere = new Date().toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' });
+  await ref.collection('membres').doc(await idFiches(f.code)).set({ fiches: await chiffrer(f.code, { genere, fiches }), maj: new Date().toISOString() });
+  // ancien code d'équipe (après « Créer un nouveau code ») : son bloc est effacé
+  if (f.ancienCode && f.ancienCode !== f.code) { try { await ref.collection('membres').doc(await idFiches(f.ancienCode)).delete(); delete f.ancienCode; sauver(); } catch (e) {} }
+  empreinte = h; publieLe = new Date().toISOString(); erreurEnLigne = '';
+  return true;
+}
+window.fichesEnLigne = {
+  publier: (db, ref, force) => publierEnLigne(db, ref, force).catch(e => { erreurEnLigne = e.message || String(e); console.warn('fiches en ligne', e); return false; }),
+  lien: (e, n) => lienEnLigne(e, n)
+};
+window.fichesMettreEnLigne = async b => {
+  const s = S(); if (!(s.enligne && s.enligne.e)) { toast("Active d'abord l'appli en ligne (Absences AESH)"); return; }
+  if (b) { b.disabled = true; b.textContent = 'Mise à jour…'; }
+  try {
+    if (!(window.firebase && firebase.apps && firebase.apps.length && firebase.auth().currentUser)) throw new Error('connecte la Synchro sur cet appareil (en bas du menu)');
+    const f = etat(); if (!f.code) { f.code = nouveauCode(); f.change = new Date().toISOString(); }
+    attribuerCodes(); sauver();
+    const db = firebase.firestore(); await publierEnLigne(db, db.collection('enligne').doc(s.enligne.e), true);
+    toast('Fiches en ligne à jour');
+  } catch (e) { erreurEnLigne = e.message || String(e); toast('Mise à jour impossible : ' + erreurEnLigne); }
+  window.pageFichesAesh();
+};
 
 async function chiffrer(code, obj) {
   const sel = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
@@ -106,8 +157,8 @@ const brancherPied = () => { const b = document.getElementById('oubli'); if (b) 
 function afficher(D) {
   const n = codeEleve(); if (!n) return demanderEleve(D, '');
   const f = D.fiches[n]; if (!f) return demanderEleve(D, 'Aucune fiche avec le numéro ' + n + '.');
-  M.innerHTML = '<div class="carte"><h1>Élève n° ' + esc(n) + '</h1><div style="font-size:18px">Classe ' + esc(f.classe) + (f.disp ? ' · ' + esc(f.disp) : '') + '</div><div class="gris">' + esc(f.site) + '</div></div>'
-    + '<div class="carte"><h2>Accompagnement</h2><div>' + esc(f.acc) + '</div></div>'
+  M.innerHTML = '<div class="carte"><h1>' + (f.prenom ? esc(f.prenom + ' ' + (f.ini || '')) : 'Élève n° ' + esc(n)) + '</h1><div style="font-size:18px">Classe ' + esc(f.classe) + (f.disp ? ' · ' + esc(f.disp) : '') + '</div><div class="gris">' + esc(f.site) + (f.prenom ? ' · n° ' + esc(n) : '') + '</div></div>'
+    + '<div class="carte"><h2>Accompagnement</h2><div>' + esc(f.notif || f.acc) + '</div></div>'
     + '<div class="carte"><h2>Aides à mettre en place</h2>' + (f.aides.length ? '<ul>' + f.aides.map(a => '<li>' + esc(a) + '</li>').join('') + '</ul>' : '<p class="gris">Demande à la coordinatrice ou au professeur.</p>') + '</div>'
     + pied(D);
   brancherPied();
@@ -127,8 +178,24 @@ function telecharger(nom, texte, type) {
   const u = URL.createObjectURL(new Blob([texte], { type })), a = document.createElement('a'); a.href = u; a.download = nom; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000);
 }
 
+// 26/11 : la page Netlify (puces NFC, QR codes déjà imprimés) renvoie vers les fiches en ligne : plus besoin de la redéposer à chaque changement
+function pageRenvoi(e) {
+  return `<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Fiche élève</title>
+<script>location.replace(${JSON.stringify(PAGE_EN_LIGNE + '#e=' + e)} + (location.hash.replace(/\\D/g, '').slice(0, 4) ? '&n=' + location.hash.replace(/\\D/g, '').slice(0, 4) : ''));</script>
+</head><body style="font:16px sans-serif;padding:24px">Ouverture de la fiche… <a href="${PAGE_EN_LIGNE + '#e=' + e}">Toucher ici si rien ne se passe</a></body></html>`;
+}
+
 window.fichesFabriquer = async () => {
   const f = etat(), msg = $('#fa-msg'); if (!f.code) { f.code = nouveauCode(); f.change = new Date().toISOString(); }
+  const en = S().enligne && S().enligne.e;
+  if (en) {
+    const n = attribuerCodes(); f.fabrique = new Date().toISOString(); sauver();
+    telecharger('index.html', pageRenvoi(en), 'text/html');
+    msg.innerHTML = `<div style="background:#E9F7EE;border:1px solid #7CC596;border-radius:10px;padding:12px 14px;margin-top:10px;color:#1F2A33"><b>Page de renvoi fabriquée${n ? ' (' + n + ' nouveaux numéros)' : ''}.</b>
+      <p class="small" style="margin:6px 0 0">À déposer <b>une seule fois</b> sur Netlify (à partir du 6 décembre) : mets <b>index.html</b> seul dans un dossier « fiches-coordo » et glisse-le dans le site des fiches, onglet Deploys. Ensuite les puces et QR codes ouvrent toujours les fiches à jour, avec le prénom.</p></div>`;
+    return;
+  }
   const n = attribuerCodes(), fiches = {}, E = elevesConcernes();
   E.forEach(e => { fiches[f.codes[e.id]] = ficheDe(e); });
   msg.innerHTML = '<p class="muted">Chiffrement des ' + E.length + ' fiches…</p>';
@@ -177,9 +244,10 @@ window.fichesImprimer = async () => {
 };
 
 window.fichesNouveauCode = async () => {
-  if (!(await window.demander("Créer un nouveau code d'équipe ? L'ancien ne marchera plus dès que tu auras déposé la nouvelle page sur Netlify. Toutes les AESH devront taper le nouveau code.", { ok: 'Créer un nouveau code', danger: true }))) return;
-  const f = etat(); f.code = nouveauCode(); f.change = new Date().toISOString(); sauver(); window.pageFichesAesh();
-  toast('Nouveau code créé : fabrique la page et dépose-la sur Netlify');
+  if (!(await window.demander(S().enligne && S().enligne.e ? "Créer un nouveau code d'équipe ? L'ancien cessera de marcher tout de suite pour tout le monde. Toutes les AESH devront taper le nouveau code." : "Créer un nouveau code d'équipe ? L'ancien ne marchera plus dès que tu auras déposé la nouvelle page sur Netlify. Toutes les AESH devront taper le nouveau code.", { ok: 'Créer un nouveau code', danger: true }))) return;
+  const f = etat(); if (f.code) f.ancienCode = f.code; f.code = nouveauCode(); f.change = new Date().toISOString(); sauver();
+  if (S().enligne && S().enligne.e) { await window.fichesMettreEnLigne(); toast("Nouveau code créé : donne-le aux AESH"); return; }
+  window.pageFichesAesh(); toast('Nouveau code créé : fabrique la page et dépose-la sur Netlify');
 };
 window.fichesSite = async () => {
   const v = await window.saisir('Adresse du site des fiches sur Netlify :', etat().site || '', { ok: 'Enregistrer' }); if (v === null || !v.trim()) return; const f = etat();
@@ -244,23 +312,31 @@ let feOuvert = null, feAdmin = false, feQ = '';
 function feGestion(f, E) {
   const sansNum = E.filter(e => !f.codes[e.id]).length;
   const date = iso => iso ? new Date(iso).toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' }) : '';
-  return `<div class="card" style="margin-bottom:14px">
+  const en = S().enligne && S().enligne.e, lien = en ? lienEnLigne(en) : '';
+  const enLigne = en ? `<div class="card" style="margin-bottom:14px;border-left:4px solid ${erreurEnLigne ? '#FF7E6E' : '#82D6A0'}">
+    <h2 style="margin-top:0">Fiches en ligne, avec le prénom</h2>
+    <p class="muted" style="margin:0 0 10px">Après le code d'équipe, l'AESH voit le <b>prénom et l'initiale du nom</b> de l'élève, sa classe, sa notification, ses AESH habituelles et les aides. Elle peut aussi choisir une classe et toucher le prénom de l'élève : plus besoin du QR code ni du classeur. Le lien « Voir la fiche » des créneaux de remplacement ouvre cette page.</p>
+    <p style="margin:0 0 6px;word-break:break-all">Lien à donner à l'équipe : <a href="${esc(lien)}" target="_blank" rel="noopener">${esc(lien)}</a></p>
+    <p style="margin:0 0 10px"><button class="btn sm" onclick="fichesCopier('${esc(lien)}',this)">Copier le lien</button> <button class="btn sm" onclick="fichesMettreEnLigne(this)">Mettre à jour maintenant</button></p>
+    <p class="small muted" style="margin:0">${erreurEnLigne ? '<b style="color:#FF7E6E">Dernière mise à jour impossible : ' + esc(erreurEnLigne) + '</b>' : publieLe ? 'Mise à jour le ' + date(publieLe) + '.' : 'Mise à jour toute seule toutes les 2 minutes quand Cockpit est ouvert et la Synchro connectée.'}</p>
+  </div>` : '';
+  return enLigne + `<div class="card" style="margin-bottom:14px">
     <h2 style="margin-top:0">Liens NFC et page des fiches</h2>
-    <p class="muted" style="margin:0 0 10px">Les AESH qui remplacent scannent la puce ou le QR code de l'élève : elles voient sa classe, son accompagnement et les aides à mettre en place. Aucun nom n'apparaît, seulement un numéro à 4 chiffres. La page est chiffrée avec le code d'équipe.</p>
+    <p class="muted" style="margin:0 0 10px">Les AESH qui remplacent scannent la puce ou le QR code de l'élève${en ? ' : la puce ouvre la fiche en ligne ci-dessus (une fois la page de renvoi déposée sur Netlify)' : ' : elles voient sa classe, son accompagnement et les aides à mettre en place'}. Le nom n'est jamais écrit sur la puce ni sur le QR code, seulement un numéro à 4 chiffres. Tout est chiffré avec le code d'équipe.</p>
     <p style="margin:0 0 10px">Adresse : <a href="${esc(f.site)}" target="_blank" rel="noopener">${esc(f.site)}</a> <button class="btn sm" onclick="fichesSite()">Changer</button></p>
     <p class="small muted" style="margin:0 0 10px">${E.length} élèves suivis${sansNum ? ` · <b>${sansNum} sans numéro</b> (ils en recevront un)` : ''}${f.fabrique ? ' · page fabriquée le ' + date(f.fabrique) : ' · page jamais fabriquée'}</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn primary" onclick="fichesFabriquer()">Fabriquer la page des fiches</button>
+      <button class="btn${en ? '' : ' primary'}" onclick="fichesFabriquer()">${en ? 'Fabriquer la page de renvoi (Netlify)' : 'Fabriquer la page des fiches'}</button>
       <button class="btn" onclick="fichesImprimer()">Imprimer les QR codes et numéros</button>
     </div>
-    <p class="small muted" style="margin:10px 0 0">Refais « Fabriquer » après un changement d'aides ou l'arrivée d'un élève, puis dépose le fichier sur Netlify. Les numéros, les puces et les QR codes ne changent pas.</p>
+    <p class="small muted" style="margin:10px 0 0">${en ? 'La page de renvoi se dépose une seule fois sur Netlify (pas de dépôt possible avant le 6 décembre). Ensuite plus rien à déposer : les fiches en ligne se mettent à jour toutes seules.' : 'Refais « Fabriquer » après un changement d\'aides ou l\'arrivée d\'un élève, puis dépose le fichier sur Netlify.'} Les numéros, les puces et les QR codes ne changent pas.</p>
     <div id="fa-msg"></div>
   </div>
   <div class="card">
     <h2 style="margin-top:0">Code d'équipe</h2>
     ${f.code ? `<p style="margin:0 0 6px">Code actuel : <b style="font-family:ui-monospace,Menlo,monospace;font-size:1.15em">${esc(f.code)}</b> <button class="btn sm" onclick="fichesCopier('${esc(f.code)}',this)">Copier</button></p>
-    ${f.change ? `<p class="small muted" style="margin:0 0 10px">Créé le ${date(f.change)}${f.fabrique && f.fabrique < f.change ? ' · <b style="color:#FF7E6E">pas encore dans la page en ligne : fabrique-la et dépose-la</b>' : ''}</p>` : ''}` : '<p class="muted">Il sera créé à la première fabrication.</p>'}
-    <p>En cas de fuite, crée un nouveau code, puis fabrique et dépose la page : l'ancien code cessera de marcher pour tout le monde. Donne le nouveau aux AESH de vive voix ou sur papier.</p>
+    ${f.change ? `<p class="small muted" style="margin:0 0 10px">Créé le ${date(f.change)}${!en && f.fabrique && f.fabrique < f.change ? ' · <b style="color:#FF7E6E">pas encore dans la page en ligne : fabrique-la et dépose-la</b>' : ''}</p>` : ''}` : '<p class="muted">Il sera créé à la première fabrication.</p>'}
+    <p>${en ? 'Les AESH le tapent une fois sur leur téléphone, qui s\'en souvient. En cas de fuite, crée un nouveau code : l\'ancien cesse de marcher tout de suite pour tout le monde.' : 'En cas de fuite, crée un nouveau code, puis fabrique et dépose la page : l\'ancien code cessera de marcher pour tout le monde.'} Donne le nouveau aux AESH de vive voix ou sur papier.</p>
     <button class="btn" onclick="fichesNouveauCode()">Créer un nouveau code d'équipe</button>
   </div>`;
 }
