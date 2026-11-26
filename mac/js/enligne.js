@@ -4,7 +4,8 @@
    - Profs : demande.html#e=ESPACE&k=CLE_PROFS → écrivent une demande (ils ne peuvent rien lire).
    - AESH : equipe.html#e=ESPACE&p=CLE_PERSO → lisent leur propre fiche (créneaux à prendre, demandes proposées),
      écrivent des réponses (prise, annulation, candidature). Seule Cécile lit les réponses et les demandes.
-   - Aucune donnée d'élève n'est publiée, sauf le texte « élève et aides » que Cécile communique à l'AESH validée (effacé le lendemain).
+   - Aucune donnée d'élève n'est publiée en clair, sauf le texte « élève et aides » que Cécile communique à l'AESH validée (effacé le lendemain).
+     Les fiches élèves (prénom + initiale, classe, notification, aides) sont publiées CHIFFRÉES avec le code d'équipe (fiches.js, 26/11).
    - Les mails ne partent pas tout seuls : Cockpit ouvre un brouillon de mail prêt à envoyer. */
 (() => {
 'use strict';
@@ -89,9 +90,11 @@ async function republier(db, cfg, ctx) {
   const D = ctx.D || (await racine(db, cfg).collection('demandes').get()).docs.map(d => Object.assign({ id: d.id }, d.data()));
   const nomA = id => ((S().aesh || []).find(a => a.id === id) || {}).nom || '';
   // pseudonymisation : l'AESH voit le numéro de fiche de l'élève (4 chiffres), jamais sa classe ni son dispositif
+  // 26/11 : le lien « Voir la fiche » ouvre les fiches en ligne (fiches.html, prénom visible après le code d'équipe)
   const F = S().fiches || {}, siteFiches = () => String(F.site || 'https://fiches-eleves.netlify.app/').replace(/\/?$/, '/');
+  const lienFiche = n => window.fichesEnLigne && F.code ? window.fichesEnLigne.lien(cfg.e, n) : siteFiches() + '#' + n;
   const numEleve = crId => { const c = (S().creneaux || []).find(x => x.id === crId); return (c && (F.codes || {})[c.eleveId]) || ''; };
-  const occ = (pub && pub.occurrences || []).filter(o => o.date >= auj()).map(o => { const p = prises[o.id]; return { id: o.id, creneauId: o.creneauId, date: o.date, debut: o.debut, fin: o.fin, semaine: o.semaine || '', eleve: numEleve(o.creneauId), fiche: numEleve(o.creneauId) ? siteFiches() + '#' + numEleve(o.creneauId) : '', site: o.site || '', matiere: o.matiere || '', absent: nomA(o.absentId), prisPar: p && !p.annulee ? p.aeshId : null, prisParNom: p && !p.annulee ? nomA(p.aeshId) : '' }; });
+  const occ = (pub && pub.occurrences || []).filter(o => o.date >= auj()).map(o => { const p = prises[o.id]; return { id: o.id, creneauId: o.creneauId, date: o.date, debut: o.debut, fin: o.fin, semaine: o.semaine || '', eleve: numEleve(o.creneauId), fiche: numEleve(o.creneauId) ? lienFiche(numEleve(o.creneauId)) : '', site: o.site || '', matiere: o.matiere || '', absent: nomA(o.absentId), prisPar: p && !p.annulee ? p.aeshId : null, prisParNom: p && !p.annulee ? nomA(p.aeshId) : '' }; });
   const batch = db.batch(); let n = 0;
   for (const a of (S().aesh || [])) {
     const cle = conf.membres[a.id]; if (!cle) continue;
@@ -103,6 +106,7 @@ async function republier(db, cfg, ctx) {
     batch.set(racine(db, cfg).collection('membres').doc(cle), Object.assign(doc, { maj: new Date().toISOString() })); n++;
   }
   if (n) await batch.commit();
+  if (window.fichesEnLigne) await window.fichesEnLigne.publier(db, racine(db, cfg)); // ne publie que si les fiches ont changé
   return n;
 }
 

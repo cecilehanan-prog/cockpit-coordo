@@ -3,7 +3,7 @@
 Le cockpit de suivi AESH. **Ce dépôt sert de sauvegarde du code.**
 
 👉 **Ouvrir l'appli :** https://cockpit-coordo.netlify.app/
-👉 **Fiches élèves AESH (NFC / QR) :** https://fiches-eleves.netlify.app/
+👉 **Fiches élèves AESH :** https://cecilehanan-prog.github.io/cockpit-coordo/fiches.html (prénom visible après le code d'équipe ; puces NFC et QR codes via https://fiches-eleves.netlify.app/)
 
 L'ancienne adresse https://cecilehanan-prog.github.io/cockpit-coordo/ renvoie automatiquement vers Netlify
 (et retire l'ancienne appli installée depuis github.io, pour qu'elle ne reste pas en cache).
