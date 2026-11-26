@@ -67,7 +67,7 @@ async function essayer(code, nouveau) {
   M.innerHTML = '<div class="carte gris">Ouverture des fiches…</div>';
   const id = await idFiches(code), r = await chercherBloc(id);
   if (r.erreur) return demanderCode('Pas de connexion internet. Réessaie dans un instant.', code);
-  if (r.absent) { garder(K_CODE, ''); return demanderCode(nouveau ? 'Ce code ne marche pas. Vérifie-le auprès de la coordinatrice.' : 'Le code d\'équipe a changé. Tape le nouveau code.'); }
+  if (r.absent) { garder(K_CODE, ''); return demanderCode(nouveau ? 'Aucune fiche en ligne avec ce code. Vérifie le code ; sinon, la coordinatrice doit d\'abord toucher « Mettre à jour maintenant » dans Cockpit.' : 'Le code d\'équipe a changé. Tape le nouveau code.'); }
   try { D = await dechiffrer(code, r.bloc); } catch (e) { garder(K_CODE, ''); return demanderCode('Ce code ne marche pas. Vérifie-le auprès de la coordinatrice.'); }
   horsLigne = !!r.horsLigne; garder(K_CODE, code); afficher();
 }
