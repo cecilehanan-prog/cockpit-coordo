@@ -1045,6 +1045,26 @@ function majCompteurQuestions() { const el = document.getElementById('nav-questi
 function majCompteurConseils() { const el = document.getElementById('nav-conseils'); if (!el) return; const sem = ccSemaineEnCours(), jj = sem.some(c => c.date === aujourdhui()); el.className = 'pill ' + (jj ? 'bad' : 'cc'); el.textContent = sem.length || ''; el.title = sem.length ? `${sem.length} conseil${sem.length > 1 ? 's' : ''} de classe cette semaine` : ''; el.style.display = sem.length ? '' : 'none'; }
 function majCompteurEss() { majCompteurQuestions(); try { majCompteurConseils(); } catch (x) { } majCompteurEvals(); majCompteurAbsences(); const el = document.getElementById('nav-ess'); if (!el) return; const sem = essSemaineEnCours(), dus = essDus().n, jj = sem.some(e => e.essDate === aujourdhui()); const n = sem.length || dus; el.className = 'pill ' + (jj ? 'bad' : sem.length ? 'ess' : 'warn'); el.textContent = n || ''; el.title = sem.length ? `${sem.length} ESS cette semaine${dus ? ' · ' + dus + ' rappel' + (dus > 1 ? 's' : '') + ' à envoyer aux AESH' : ''}` : dus ? `${dus} rappel${dus > 1 ? 's' : ''} d'ESS à envoyer aux AESH` : ''; el.style.display = n ? '' : 'none'; }
 const essSemaineEnCours = () => { const now = new Date(); return essDeLaSemaine(isoLocal(lundiDe(aujourdhui()))).filter(e => essMoment(e) >= now); };
+// Pastilles chiffrées du menu (demande de Hanan du 26/11) : combien d'élèves, d'AESH, d'élèves SEGPA / ULIS et de classes, recalculé à chaque affichage.
+// Élèves = même effectif que la tuile « élèves suivis » de la Synthèse (effectifSuivis, règle du 22/11).
+function majCompteursMenu() {
+  const plur = (n, s) => n + ' ' + s + (n > 1 ? 's' : '');
+  const pose = (route, n, titre) => {
+    const a = document.querySelector('#nav a[href="#/' + route + '"]'); if (!a) return;
+    let b = a.querySelector('.nav-nb'); if (!b) { b = document.createElement('span'); b.className = 'nav-nb'; a.appendChild(b); }
+    b.textContent = n; b.title = titre; a.title = titre;
+  };
+  try {
+    const f = effectifSuivis(), ord = f.n - f.segpa - f.ulis;
+    pose('eleves', f.n, plur(f.n, 'élève') + ' suivi' + (f.n > 1 ? 's' : '') + ' (comme dans la Synthèse) : ' + ord + ' en voie ordinaire' + (f.segpa || f.ulis ? ' + ' + dontDisp(f.segpa, f.ulis) + ' notifiés' : '') + ' · ' + f.ind + ' individuel' + (f.ind > 1 ? 's' : '') + ', ' + f.mut + ' mutualisé' + (f.mut > 1 ? 's' : ''));
+    const A = S.aesh || [], nd = d => A.filter(a => (a.dispositif || '') === d).length, ld = A.filter(a => a.longueDuree).length;
+    pose('aesh', A.length, A.length + ' AESH' + ' dans l\u2019équipe : ' + nd('') + ' en voie ordinaire, ' + nd('ULIS') + ' ULIS, ' + nd('SEGPA') + ' SEGPA' + (ld ? ' (dont ' + ld + ' en arrêt longue durée)' : ''));
+    const act = S.eleves.filter(isActive), sg = act.filter(e => dispositifDe(e) === 'SEGPA'), ul = act.filter(e => dispositifDe(e) === 'ULIS'), n = x => x.filter(e => e.statut === 'Notifié').length;
+    pose('dispositifs', sg.length + ul.length, plur(sg.length + ul.length, 'élève') + ' en SEGPA / ULIS collège : ' + sg.length + ' SEGPA (' + n(sg) + ' notifié' + (n(sg) > 1 ? 's' : '') + '), ' + ul.length + ' ULIS (' + n(ul) + ' notifié' + (n(ul) > 1 ? 's' : '') + ')');
+    const C = S.classes || [], avec = C.filter(c => elevesDe(c).length).length;
+    pose('classes', avec, plur(avec, 'classe') + ' avec au moins un élève suivi' + (C.length !== avec ? ' (' + C.length + ' classes enregistrées en tout)' : ''));
+  } catch (x) { console.warn('compteurs du menu', x); }
+}
 function majCompteurAlertes() { majCompteurEss(); const el = document.getElementById('nav-alertes'); if (!el) return; const n = alertes().length; const bb = document.getElementById('bb-alertes'); if (bb) { bb.textContent = n; bb.hidden = !n; } el.textContent = n || ''; el.style.display = n ? '' : 'none'; }
 
 /* ====================== SYNTHÈSE PAR AESH (impression) ====================== */
@@ -1584,7 +1604,7 @@ function rendre() {
   const [, name, id] = hash.split('/');
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#/' + name));
   document.querySelectorAll('#bottombar a').forEach(a => a.classList.toggle('on', a.dataset.r === name)); toggleMenu(false);
-  $('#topactions').innerHTML = ''; majSemSel(); majCompteurAlertes();
+  $('#topactions').innerHTML = ''; majSemSel(); majCompteurAlertes(); majCompteursMenu();
   const ss = document.getElementById('savestate'); if (ss && !ss.textContent) ss.textContent = 'Données chargées';
   $('#brand-sub').textContent = (S.etablissement || 'Suivi AESH') + ' · ' + S.annee;
   const page = $('#page'); page.className = 'page';
