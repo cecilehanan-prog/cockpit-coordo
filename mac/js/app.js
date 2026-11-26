@@ -644,6 +644,24 @@ function renommerHeritier(s) {
     if (o && typeof o === 'object') Object.keys(o).forEach(k => { o[k] = parcourir(o[k], k); }); return o; };
   for (const k of ['aesh', 'eleves', 'classes', 'questions', 'conseils', 'datesEtab', 'journal', 'absences', 'archives', 'evals']) if (s[k]) parcourir(s[k], k);
 }
+// 26/11 : la classe MAV du lycée pro devient MAC partout (classes, élèves, EDT, conseils, ESS, textes). Noms et prénoms des personnes et journal non touchés.
+function renommerMavEnMac(s) {
+  const re = /MAV(?![A-Za-zÀ-ÿ])/g, conv = t => typeof t === 'string' ? t.replace(re, 'MAC') : t;
+  const PERSONNES = new Set(['eleves', 'aesh']), SAUTER = new Set(['journal']);
+  const marcher = (o, racine, dansPersonne) => {
+    if (Array.isArray(o)) { for (let i = 0; i < o.length; i++) { if (o[i] && typeof o[i] === 'object') marcher(o[i], false, dansPersonne); else o[i] = conv(o[i]); } return; }
+    for (const k of Object.keys(o)) {
+      if (racine && SAUTER.has(k)) continue;
+      const v = o[k], perso = racine ? PERSONNES.has(k) : dansPersonne;
+      if (v && typeof v === 'object') marcher(v, false, perso);
+      else if (!(dansPersonne && (k === 'nom' || k === 'prenom'))) o[k] = conv(v);
+      const k2 = conv(k); if (k2 !== k && !(k2 in o)) { o[k2] = o[k]; delete o[k]; }
+    }
+  };
+  marcher(s, true, false);
+  // une classe MAC existait déjà : une seule fiche classe (la première), les autres sont retirées
+  const vues = new Set(); s.classes = (s.classes || []).filter(c => { const n = String(c.nom || '').trim(); if (!/MAC/.test(n)) return true; if (vues.has(n)) return false; vues.add(n); return true; });
+}
 function migrate(s) {
   s.affConfirmees = s.affConfirmees || []; s.affectations.forEach(x => { if (x.aConfirmer && s.affConfirmees.includes(cleAff(x))) x.aConfirmer = false; });
   s.schemaVersion = s.schemaVersion || 1;
@@ -663,6 +681,7 @@ function migrate(s) {
   // 25/11 : Narya ALI est en voie ordinaire, sa fiche doit être rose comme le reste de l'équipe en ordinaire (elle avait été créée en bleu). Une seule fois (drapeau couleurAli2511).
   // 26/11 : demande de Hanan, Khalida TAYARA (en arrêt longue durée) quitte l'équipe le 02/12/2026 : elle n'est plus comptée à partir de cette date.
   // Une seule fois (drapeau sortieTayara2611) ; une date déjà saisie dans sa fiche n'est pas écrasée. Sa fiche et son historique sont gardés.
+  if (!s.classeMac2611) { s.classeMac2611 = true; renommerMavEnMac(s); } // 26/11 : au lycée pro, la classe MAV s'appelle maintenant MAC (ex. 1MAV → 1MAC), partout
   if (!s.sortieTayara2611) { s.sortieTayara2611 = true; const L = s.aesh.filter(a => /\bTAYARA\b/i.test(a.nom || '')); if (L.length === 1 && !L[0].dateSortie) L[0].dateSortie = '2026-12-02'; }
   if (!s.couleurAli2511) { s.couleurAli2511 = true; s.aesh.forEach(a => { if (/\bnarya\b/i.test(a.nom || '') && /\bali\b/i.test(a.nom || '') && String(a.couleur || '').toUpperCase() === '#1F7A8C') a.couleur = '#C2477D'; }); }
   s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
