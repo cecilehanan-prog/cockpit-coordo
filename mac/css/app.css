@@ -372,3 +372,6 @@ nav a .lib{min-width:0}nav a .lib .pill{margin-left:3px;vertical-align:1px;font-
 .bandeau-rempl .br-aide{margin-top:6px}
 @keyframes flashCible{0%,40%{background:#FFE58F;box-shadow:0 0 0 3px #FFD24D}100%{background:transparent;box-shadow:none}}
 .flash-cible{animation:flashCible 2.6s ease-out}
+/* Pastilles chiffrées du menu (26/11) : nombre d'élèves, d'AESH, SEGPA / ULIS, classes */
+.nav a .nav-nb{margin-left:auto;flex:none;min-width:24px;height:24px;padding:0 6px;border-radius:12px;background:rgba(255,255,255,.18);color:#fff;font-size:12.5px;font-weight:700;line-height:24px;text-align:center;font-variant-numeric:tabular-nums}
+.nav a.active .nav-nb{background:var(--primary);color:#fff}
