@@ -1652,6 +1652,8 @@ function rendre() {
   (routes[name] || pageSynthese)();
   bandeauEss(); page.scrollTop = 0; allerCible();
 }
+// 26/11 : changer de page (bouton Retour, menu) ferme la fenêtre ouverte, qui sinon restait affichée par-dessus la nouvelle page
+window.addEventListener('hashchange', () => { const m = document.getElementById('modal'); if (m && m.innerHTML) closeModal(); const r = document.getElementById('recherche-eleve'); if (r) r.remove(); });
 window.addEventListener('hashchange', render);
 function setTitle(t, actions = '') { $('#title').textContent = t; $('#topactions').innerHTML = actions; }
 
