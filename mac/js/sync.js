@@ -29,7 +29,7 @@ const L = { cle: 'cockpit-sync-cle', sel: 'cockpit-sync-sel', vu: 'cockpit-sync-
   copie: 'cockpit-pas-v1-copie-avant-synchro', copie2: 'cockpit-pas-v1-copie-avant-v2' };
 const DOC = 'etat-v2', ANCIEN = 'etat', ANCIEN_SAUVE = 'etat-ancien', PAUSE = 'en-pause-mettre-a-jour';
 const ITER = 600000;
-const VERSION = '2026-11-26g'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
+const VERSION = '2026-11-26h'; // affichée dans la fenêtre Synchro : permet de vérifier que l'appareil a la dernière version
 let distant = null; // { appareil, savedAt } du dernier bloc vu en ligne
 // journal de la synchro (visible dans la fenêtre Synchro, gardé sur l'appareil) : dit exactement où ça en est
 let etape = '';
@@ -201,6 +201,7 @@ function fenetre() {
         <button class="btn" type="button" id="sync-reset" hidden>J'ai oublié ma phrase : recommencer depuis cet appareil</button>
       </form>`}
     <p class="small" id="sync-msg" style="margin-top:10px">${echap(message)}</p>
+    ${window.cockpitEcritures ? (() => { const E = window.cockpitEcritures(), L = Object.entries(E).filter(([k]) => k !== 'jour'), t = L.reduce((a, [, v]) => a + v, 0); return `<p class="small muted" style="margin:4px 0 0">Enregistrements envoyés à Firebase aujourd'hui par cet appareil : <b>${t}</b>${L.length ? ' (' + L.map(([k, v]) => echap(k) + ' ' + v).join(', ') + ')' : ''}. Limite gratuite : 20 000 par jour pour tous tes appareils.</p>`; })() : ''}
     <p class="small muted" style="margin:4px 0 0">Version ${VERSION} (code ${window.COCKPIT_CODE_SOURCE === 'github' ? 'pris sur GitHub' : 'de cet appareil'})${distant ? ` · dernier envoi en ligne : ${echap(distant.appareil || '?')}, ${quand(distant.savedAt)}` : ''}</p>
     ${connecte && Object.keys(appareils).length ? `<div class="small" style="margin-top:8px"><b>Tes appareils</b>${appareilsVisibles().map(([id, a]) => `<div>${id === monId ? '▸ ' : ''}${echap(a.nom)} · version ${echap(a.version)}${a.version === VERSION ? ' ✓' : ' <b style="color:var(--bad,#c33)">ancienne</b>'} · vu le ${quand(a.vu)}${id === monId ? ' (cet appareil)' : ''}</div>`).join('')}</div>` : ''}
     ${ancienActif ? `<p class="small" style="margin-top:8px;color:var(--bad,#c33)"><b>⚠ ${echap(ancienMsg())}</b></p>` : ''}
@@ -312,8 +313,11 @@ async function ecrire(ref, o, quoi) {
   await ecrireDirect(ref.path, o); noter('envoyé (envoi direct) : ' + ref.path.split('/').pop());
 }
 // fiche de cet appareil (nom, version du code, dernier contact) : visible dans la fenêtre Synchro de tous les appareils
+let dernierSignal = 0;
 async function signaler() {
   if (!utilisateur) return;
+  if (Date.now() - dernierSignal < 20 * 60000 && appareils[monId] && appareils[monId].version === VERSION) return; // 26/11 : au plus toutes les 20 minutes (économie d'enregistrements Firebase)
+  dernierSignal = Date.now();
   try { await delai(dossier(utilisateur).doc('appareils').set({ [monId]: { nom: nomAppareil(), version: VERSION, code: window.COCKPIT_CODE_SOURCE || 'local', vu: new Date().toISOString() } }, { merge: true }), 20000, 'Liste des appareils'); } catch (e) { console.warn('appareils', e); }
 }
 // L'ancien emplacement (« etat ») servait aux anciennes versions du code. On en garde une copie (« etat-ancien »), puis on le

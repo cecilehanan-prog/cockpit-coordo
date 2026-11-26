@@ -13,6 +13,25 @@ const ORIGINE = 'https://enligne.coordo'; // adresse « interne » : jamais cont
 // toujours l'adresse Netlify, quel que soit l'endroit où le cockpit est ouvert (appli Mac, ancienne adresse github.io…)
 const BASE = 'https://cockpit-coordo.netlify.app/';
 const fetchOrig = window.fetch.bind(window);
+/* 26/11 : compteur des enregistrements envoyés à Firebase par CET appareil, par jour (offre gratuite : 20 000 par jour pour tout le projet).
+   Affiché dans la fenêtre Synchro, pour trouver ce qui consomme. Rien n'est envoyé : c'est gardé sur l'appareil. */
+const K_ECR = 'cockpit-ecritures-jour';
+const ecritures = (() => { let o = {}; try { o = JSON.parse(localStorage.getItem(K_ECR) || '{}'); } catch (e) {} const j = new Date().toISOString().slice(0, 10); return o.jour === j ? o : { jour: j }; })();
+function compter(chemin, n = 1) {
+  const j = new Date().toISOString().slice(0, 10); if (ecritures.jour !== j) { Object.keys(ecritures).forEach(k => delete ecritures[k]); ecritures.jour = j; }
+  const z = /coffres\//.test(chemin) ? (/appareils/.test(chemin) ? 'appareils' : 'synchro') : /\/membres\/f[0-9a-f]{32}/.test(chemin) ? 'fiches' : /\/membres\//.test(chemin) ? 'liens AESH' : /enligne\//.test(chemin) ? 'appli en ligne' : 'autre';
+  ecritures[z] = (ecritures[z] || 0) + n; try { localStorage.setItem(K_ECR, JSON.stringify(ecritures)); } catch (e) {}
+}
+window.cockpitEcritures = () => ecritures;
+function brancherCompteur() {
+  const F = window.firebase && firebase.firestore; if (!F || !F.DocumentReference || F.__compte) { if (!(F && F.__compte)) setTimeout(brancherCompteur, 500); return; }
+  F.__compte = true;
+  const D = F.DocumentReference.prototype, B = F.WriteBatch && F.WriteBatch.prototype, C = F.CollectionReference && F.CollectionReference.prototype;
+  ['set', 'update', 'delete'].forEach(m => { const o = D[m]; if (o) D[m] = function () { compter(this.path); return o.apply(this, arguments); }; });
+  if (B) ['set', 'update', 'delete'].forEach(m => { const o = B[m]; if (o) B[m] = function (ref) { compter(ref && ref.path || ''); return o.apply(this, arguments); }; });
+  if (C && C.add) { const o = C.add; C.add = function () { compter(this.path + '/x'); return o.apply(this, arguments); }; }
+}
+brancherCompteur();
 const $ = q => document.querySelector(q);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const toast = m => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = m; document.body.appendChild(t); setTimeout(() => t.remove(), 3000); };
@@ -82,7 +101,10 @@ function libreA(a, date, debut, fin, pub) {
 function lundiIso(date) { const d = new Date(date + 'T12:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 
 /* ---------- publication des fiches personnelles des AESH ---------- */
-let dernierHash = {};
+// empreinte de chaque fiche AESH déjà envoyée, gardée sur l'appareil : on ne réécrit plus les ~25 fiches à chaque ouverture du cockpit
+const K_HASH = 'cockpit-enligne-empreintes';
+let dernierHash = {}; try { dernierHash = JSON.parse(localStorage.getItem(K_HASH) || '{}'); } catch (e) {}
+let dernierRepublier = 0;
 async function republier(db, cfg, ctx) {
   const conf = ctx.conf || await lireConfig(db, cfg);
   const pubS = await racine(db, cfg).collection('admin').doc('publication').get(), pub = pubS.exists ? pubS.data().p : null;
@@ -95,17 +117,18 @@ async function republier(db, cfg, ctx) {
   const lienFiche = n => window.fichesEnLigne && F.code ? window.fichesEnLigne.lien(cfg.e, n) : siteFiches() + '#' + n;
   const numEleve = crId => { const c = (S().creneaux || []).find(x => x.id === crId); return (c && (F.codes || {})[c.eleveId]) || ''; };
   const occ = (pub && pub.occurrences || []).filter(o => o.date >= auj()).map(o => { const p = prises[o.id]; return { id: o.id, creneauId: o.creneauId, date: o.date, debut: o.debut, fin: o.fin, semaine: o.semaine || '', eleve: numEleve(o.creneauId), fiche: numEleve(o.creneauId) ? lienFiche(numEleve(o.creneauId)) : '', site: o.site || '', matiere: o.matiere || '', absent: nomA(o.absentId), prisPar: p && !p.annulee ? p.aeshId : null, prisParNom: p && !p.annulee ? nomA(p.aeshId) : '' }; });
-  const batch = db.batch(); let n = 0;
+  const batch = db.batch(), aMettre = {}; let n = 0;
   for (const a of (S().aesh || [])) {
     const cle = conf.membres[a.id]; if (!cle) continue;
     const dem = D.filter(d => d.date >= auj() && (d.statut === 'proposee' && (!d.visibleA || d.visibleA.includes(a.id)) || d.statut === 'acceptee' && d.aeshId === a.id))
       .map(d => ({ id: d.id, date: d.date, debut: d.debut, fin: d.fin, classe: d.classe || '', salle: d.salle || '', type: d.type || '', prof: d.profNom || '', statut: d.statut, positionne: !!(cand[d.id] && cand[d.id][a.id]), validee: d.statut === 'acceptee' && d.aeshId === a.id, desiste: d.statut === 'acceptee' && d.aeshId === a.id && !!cand[d.id] && cand[d.id][a.id] === false, note: d.statut === 'acceptee' && d.aeshId === a.id && d.liberee && d.date >= auj() && !(cand[d.id] && cand[d.id][a.id] === false) ? (d.note || '') : '' }));
     const occupations = (S().creneaux || []).filter(c => c.aeshId === a.id || c.remplacantId === a.id).map(c => ({ jour: c.jour, debut: c.debut, fin: c.fin, groupe: c.groupe || null }));
     const doc = { aeshId: a.id, nom: a.nom, absente: !!(a.statut && a.statut !== 'Actif'), creneaux: occ, demandes: dem, occupations, quinzaines: (pub && pub.quinzaines) || {} };
-    const h = JSON.stringify(doc); if (dernierHash[cle] === h) continue; dernierHash[cle] = h;
+    const h = JSON.stringify(doc); if (dernierHash[cle] === h) continue; aMettre[cle] = h;
     batch.set(racine(db, cfg).collection('membres').doc(cle), Object.assign(doc, { maj: new Date().toISOString() })); n++;
   }
-  if (n) await batch.commit();
+  if (n) { await batch.commit(); Object.assign(dernierHash, aMettre); try { localStorage.setItem(K_HASH, JSON.stringify(dernierHash)); } catch (e) {} }
+  dernierRepublier = Date.now();
   if (window.fichesEnLigne) await window.fichesEnLigne.publier(db, racine(db, cfg)); // ne publie que si les fiches ont changé
   return n;
 }
@@ -138,7 +161,7 @@ async function api(chemin, corps) {
   }
   if (chemin === '/api/admin/prises') {
     const st = await lirePrises(db, cfg);
-    await republier(db, cfg, { conf });
+    if (Date.now() - dernierRepublier > 90000) await republier(db, cfg, { conf }); // déjà fait il y a moins d'1 min 30 (vérification des demandes) : on économise les lectures
     return { prises: Object.values(st) };
   }
   if (chemin === '/api/admin/publier') {
@@ -211,6 +234,7 @@ window.fetch = async (url, opt) => {
     try { const corps = opt && opt.body ? JSON.parse(opt.body) : undefined; const j = await api(chemin, corps); return new Response(JSON.stringify(j), { status: 200, headers: { 'Content-Type': 'application/json' } }); }
     catch (e) { return new Response(JSON.stringify({ erreur: e.message || String(e) }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
   }
+  try { const u = typeof url === 'string' ? url : url && url.url; if (u && /firestore\.googleapis\.com/.test(u) && opt && opt.method && opt.method !== 'GET') compter(decodeURIComponent(u.split('/documents/')[1] || '')); } catch (e) {}
   return fetchOrig(url, opt);
 };
 
