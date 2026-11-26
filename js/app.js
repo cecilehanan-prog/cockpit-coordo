@@ -1047,6 +1047,7 @@ function majCompteurEss() { majCompteurQuestions(); try { majCompteurConseils();
 const essSemaineEnCours = () => { const now = new Date(); return essDeLaSemaine(isoLocal(lundiDe(aujourdhui()))).filter(e => essMoment(e) >= now); };
 // Pastilles chiffrées du menu (demande de Hanan du 26/11) : combien d'élèves, d'AESH, d'élèves SEGPA / ULIS et de classes, recalculé à chaque affichage.
 // Élèves = même effectif que la tuile « élèves suivis » de la Synthèse (effectifSuivis, règle du 22/11).
+const nbClassesSuivies = () => (S.classes || []).filter(c => elevesDe(c).length).length; // classes avec au moins un élève suivi (pastille du menu et Synthèse)
 function majCompteursMenu() {
   const plur = (n, s) => n + ' ' + s + (n > 1 ? 's' : '');
   const pose = (route, n, titre) => {
@@ -1061,7 +1062,7 @@ function majCompteursMenu() {
     pose('aesh', A.length, A.length + ' AESH' + ' dans l\u2019équipe : ' + nd('') + ' en voie ordinaire, ' + nd('ULIS') + ' ULIS, ' + nd('SEGPA') + ' SEGPA' + (ld ? ' (dont ' + ld + ' en arrêt longue durée)' : ''));
     const act = S.eleves.filter(isActive), sg = act.filter(e => dispositifDe(e) === 'SEGPA'), ul = act.filter(e => dispositifDe(e) === 'ULIS'), n = x => x.filter(e => e.statut === 'Notifié').length;
     pose('dispositifs', sg.length + ul.length, plur(sg.length + ul.length, 'élève') + ' en SEGPA / ULIS collège : ' + sg.length + ' SEGPA (' + n(sg) + ' notifié' + (n(sg) > 1 ? 's' : '') + '), ' + ul.length + ' ULIS (' + n(ul) + ' notifié' + (n(ul) > 1 ? 's' : '') + ')');
-    const C = S.classes || [], avec = C.filter(c => elevesDe(c).length).length;
+    const C = S.classes || [], avec = nbClassesSuivies();
     pose('classes', avec, plur(avec, 'classe') + ' avec au moins un élève suivi' + (C.length !== avec ? ' (' + C.length + ' classes enregistrées en tout)' : ''));
   } catch (x) { console.warn('compteurs du menu', x); }
 }
@@ -1636,6 +1637,7 @@ function pageSynthese() {
     ${kpi(hf(r.vol), "volume horaire disponible AESH / semaine (voie ordinaire, avec la part ordinaire des AESH ULIS, hors arrêts longue durée)", 'indiv')}${(() => { const ordAct = S.eleves.filter(e => isActive(e) && !dispositifDe(e)); const hInd = ordAct.filter(e => e.type === 'Individuel').reduce((t, e) => t + (e.heures || 0), 0); const mutE = ordAct.filter(e => e.type === 'Mutualisé'); const nCl = new Set(mutE.map(e => e.classe)).size;
       return `<div class="kpi"><div class="v">${hf(hs.cible)}</div><div class="l">volume horaire total à couvrir / semaine (hors élèves SEGPA et ULIS du collège)</div><div class="small" style="margin-top:6px;line-height:1.45;border-top:1px solid var(--line);padding-top:5px">dont <b>${hf(hInd)}</b> pour les élèves en individuel (quotités notifiées)<br>dont <b>${hf(hs.cible - hInd)}</b> pour les mutualisés, partagées par classe${nCl ? ` (${nCl} classe${nCl > 1 ? 's' : ''}, ${mutE.length} élève${mutE.length > 1 ? 's' : ''})` : ''}</div></div>`; })()}${kpi(hf(hs.couv), 'volume d\'heures déjà attribuées aux AESH sur ces heures à couvrir', hs.reste > 0 ? 'warn' : 'ok')}
     ${kpi(r.manq ? '?' : hf(r.reste), r.manq ? 'volume d\'heures restant disponible (quotités manquantes)' : 'volume d\'heures restant disponible', r.manq ? 'warn' : (r.reste < 0 ? 'bad' : 'ok'))}
+    ${(() => { const n = nbClassesSuivies(); return `<a href="#/classes" class="kpi" style="text-decoration:none;color:inherit;cursor:pointer"><div class="v">${n}</div><div class="l">classe${n > 1 ? 's' : ''} avec au moins un élève suivi</div></a>`; })()}
   </div>
   <div class="grid g4" style="margin-bottom:14px">
     ${(() => { const L = S.aesh.filter(a => !absente(a) && a.quotite != null), C = L.map(a => charge(a)), som = f => C.reduce((t, c) => t + f(c), 0), vol = L.reduce((t, a) => t + a.quotite, 0);
