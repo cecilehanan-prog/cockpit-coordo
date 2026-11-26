@@ -30,8 +30,6 @@ button{font:inherit;cursor:pointer}
 .num{display:flex;gap:8px}.num input{flex:1}.num button{width:auto;margin:0;padding:0 18px}
 </style></head><body><header id="h">Fiches élèves</header><main id="m"><div class="carte gris">Chargement…</div></main>
 <script src="js/sync-config.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
 const ITER = 250000, K_CODE = 'fiches-code-equipe', K_ESP = 'fiches-espace', M = document.getElementById('m');
 const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -55,11 +53,14 @@ async function dechiffrer(code, bloc) {
 }
 // le bloc chiffré est gardé sur le téléphone : la fiche s'ouvre même avec un mauvais réseau en classe
 async function chercherBloc(id) {
+  // lecture directe (API REST de Firestore, sans compte) : plus légère et plus sûre que le SDK sur un téléphone
   try {
-    if (!firebase.apps.length) firebase.initializeApp(window.COCKPIT_FIREBASE);
-    const s = await firebase.firestore().collection('enligne').doc(ESP).collection('membres').doc(id).get();
-    if (!s.exists || !s.data().fiches) return { absent: true };
-    garder('fiches-bloc-' + id, s.data().fiches); return { bloc: s.data().fiches };
+    const c = window.COCKPIT_FIREBASE, url = 'https://firestore.googleapis.com/v1/projects/' + c.projectId + '/databases/(default)/documents/enligne/' + encodeURIComponent(ESP) + '/membres/' + id + '?key=' + c.apiKey;
+    const r = await fetch(url, { cache: 'no-store' });
+    if (r.status === 404) return { absent: true };
+    if (!r.ok) throw new Error(r.status);
+    const bloc = (((await r.json()).fields || {}).fiches || {}).stringValue; if (!bloc) return { absent: true };
+    garder('fiches-bloc-' + id, bloc); return { bloc };
   } catch (e) { const b = lire('fiches-bloc-' + id); return b ? { bloc: b, horsLigne: true } : { erreur: true }; }
 }
 let horsLigne = false;
