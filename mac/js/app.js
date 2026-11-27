@@ -323,6 +323,28 @@ function appliquerActuCite8(s) {
   });
   A.dates.forEach(d => { if (!s.datesEtab.some(x => x.id === d.id)) s.datesEtab.push({ fin: '', heure: '', heureFin: '', ...d, source: A.source }); });
 }
+/* 27/11 : calendrier des examens 2027 (Pronote), dates de virement de la paye 2026-2027 et DELF scolaire 2027 (mail CASNAV).
+   Appliqué une seule fois (drapeau datesExamsPaye2711) ; identifiants fixes, ce que Hanan modifie ou supprime ensuite n'est pas recréé. */
+const DATES_EXAMS_PAYE_2027 = [
+  ...[['2026-12-22', 'décembre 2026'], ['2027-01-27', 'janvier 2027'], ['2027-02-24', 'février 2027'], ['2027-03-25', 'mars 2027'], ['2027-04-28', 'avril 2027'], ['2027-05-27', 'mai 2027'], ['2027-06-28', 'juin 2027'], ['2027-07-28', 'juillet 2027'], ['2027-08-27', 'août 2027'], ['2027-09-28', 'septembre 2027'], ['2027-10-27', 'octobre 2027'], ['2027-11-26', 'novembre 2027'], ['2027-12-22', 'décembre 2027']]
+    .map(([date, mois]) => ({ id: 'de-' + date + '-paye', date, titre: 'Virement de la paye (' + mois + ')', detail: 'Date prévue (calendrier des virements 2026-2027)', source: 'Dates de paye 2026-2027' })),
+  { id: 'de-2027-05-11-bts', date: '2027-05-11', fin: '2027-05-21', titre: 'BTS : épreuves écrites', detail: 'Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-05-31-cap', date: '2027-05-31', fin: '2027-06-02', titre: 'CAP : épreuves écrites générales', detail: 'Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-06-02-delf-prepa', date: '2027-06-02', titre: 'DELF scolaire : journée de préparation de la session', detail: 'Examinateurs / correcteurs (CASNAV, Mme Peju). Convocations individuelles envoyées plus tard.', source: 'Mail CASNAV DELF 2027' },
+  { id: 'de-2027-06-03-delf', date: '2027-06-03', titre: 'DELF scolaire : journée des épreuves', detail: 'Examinateurs / correcteurs (CASNAV, Mme Peju). Convocations individuelles envoyées plus tard.', source: 'Mail CASNAV DELF 2027' },
+  { id: 'de-2027-06-03-bacpro', date: '2027-06-03', fin: '2027-06-25', titre: 'Bac pro : épreuves écrites (le matin)', detail: 'Oral de projet dès le 21 juin. Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-06-14-philo', date: '2027-06-14', heure: '08:00', heureFin: '12:00', titre: 'Bac : philosophie', detail: 'Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-06-15-francais', date: '2027-06-15', heure: '08:00', heureFin: '12:00', titre: 'Bac : français écrit (anticipé, 1re)', detail: 'Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-06-16-specialites', date: '2027-06-16', fin: '2027-06-18', titre: 'Bac : épreuves de spécialité (le matin)', detail: 'Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-06-21-maths', date: '2027-06-21', heure: '08:00', heureFin: '10:00', titre: 'Bac : mathématiques (1re)', detail: 'Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-06-21-grand-oral', date: '2027-06-21', fin: '2027-07-02', titre: 'Bac : grand oral', detail: 'Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-06-24-dnb', date: '2027-06-24', titre: 'DNB : épreuves écrites (1er jour)', detail: 'Session normale : jeudi 24, vendredi 25 et lundi 28 juin. Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-06-25-dnb', date: '2027-06-25', titre: 'DNB : épreuves écrites (2e jour)', detail: 'Session normale : jeudi 24, vendredi 25 et lundi 28 juin. Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-06-28-dnb', date: '2027-06-28', titre: 'DNB : épreuves écrites (3e jour)', detail: 'Session normale : jeudi 24, vendredi 25 et lundi 28 juin. Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-07-06-resultats-bac', date: '2027-07-06', titre: 'Bac : résultats', detail: 'À partir du mardi 6 juillet. Rattrapages jusqu\'au vendredi 9 juillet.', source: 'Calendrier des examens 2027' },
+  { id: 'de-2027-07-06-rattrapages', date: '2027-07-06', fin: '2027-07-09', titre: 'Bac : rattrapages', detail: 'Jusqu\'au vendredi 9 juillet', source: 'Calendrier des examens 2027' }
+];
+function appliquerDatesExamsPaye(s) { DATES_EXAMS_PAYE_2027.forEach(d => { if (!s.datesEtab.some(x => x.id === d.id)) s.datesEtab.push({ fin: '', heure: '', heureFin: '', ...d }); }); }
 // élèves suivis dans la classe du conseil (même nom de classe, sans tenir compte des espaces ni de « ULIS ») ; pour « TG + professeur », toutes les TG (groupe à vérifier)
 const ccNorm = s => normClasse(String(s || '').replace(/\bULIS\b/i, ''));
 function ccEleves(c) {
@@ -692,6 +714,7 @@ function migrate(s) {
   s.essVus = s.essVus || {}; s.prisesVues = s.prisesVues || null; s.alertesAbs = s.alertesAbs || []; if (!s.alertesInit) { s.alertesInit = true; const lim = new Date(Date.now() - 7 * 864e5).toISOString(); (s.journal || []).filter(j => j.date >= lim && / réintégrée automatiquement \(fin de /.test(j.texte || '')).forEach(j => { const a = (s.aesh || []).find(x => j.texte.startsWith(x.nom + ' réintégrée')); const m = j.texte.match(/fin de (.+?) le (\d\d)\/(\d\d)\/(\d{4})/), n = (j.texte.match(/archivés : (\d+)/) || [])[1]; if (a && m && !s.alertesAbs.some(x => x.id === 'retour-' + a.id + '-' + m[4] + '-' + m[3] + '-' + m[2])) s.alertesAbs.push({ id: 'retour-' + a.id + '-' + m[4] + '-' + m[3] + '-' + m[2], type: 'retour', le: j.date, vu: false, aeshId: a.id, fin: m[4] + '-' + m[3] + '-' + m[2], motif: m[1], n: n ? +n : 0 }); }); } s.essRappels = s.essRappels || {}; s.essNotif = s.essNotif || {};
   s.conseils = s.conseils || []; s.conseilsVus = s.conseilsVus || {}; s.conseilsNotif = s.conseilsNotif || {}; s.datesEtab = s.datesEtab || [];
   if (!s.actuCite8) { s.actuCite8 = true; appliquerActuCite8(s); } // 22/11 : conseils du 1er trimestre (heures, salles) et dates de la cité, d'après l'Actu cité n° 8
+  if (!s.datesExamsPaye2711) { s.datesExamsPaye2711 = true; appliquerDatesExamsPaye(s); } // 27/11 : examens 2027, dates de paye 2026-2027, DELF scolaire 2027
   s.segmentsRempl = s.segmentsRempl || [];
   // historique des absences : une seule fiche par absence (aucun doublon quand les données de référence sont rechargées)
   s.aesh.forEach(a => { a.statut = motifNormalise(a.statut); }); s.absences.forEach(x => { x.motif = motifNormalise(x.motif); });
