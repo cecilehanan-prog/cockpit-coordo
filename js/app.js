@@ -794,6 +794,14 @@ function migrate(s) {
     (s.classes || []).forEach(c => { if (c.nom === AV && c.site === 'SEGPA') { if ((s.classes || []).some(x => x.nom === '5e 1' && x.site === 'SEGPA')) c.supprimer = true; else c.nom = '5e 1'; } });
     s.classes = (s.classes || []).filter(c => !c.supprimer);
     if (n) (s.journal = s.journal || []).unshift({ date: new Date().toISOString(), type: 'eleve', texte: 'Classe SEGPA « 5e (à préciser) » corrigée en « 5e 1 » (EDT Pronote du 28/11)' }); } // 26/11 : au lycée pro, la classe MAV s'appelle maintenant MAC (ex. 1MAV → 1MAC), partout
+  // 28/11 (demande de Hanan) : l'élève mutualisée de 6e 6 (fiche e80) passe en 6e SEGPA (rattachée à la 6e 7 comme les autres 6e SEGPA).
+  // Son AESH de la voie ordinaire (a8) et ses créneaux avec elle sont retirés ; l'AESH SEGPA se choisit ensuite dans sa fiche. Une seule fois.
+  if (!s.passageSegpa2811) { s.passageSegpa2811 = true; const e = (s.eleves || []).find(x => x.id === 'e80' && x.classe === '6e 6' && x.site === 'Collège');
+    if (e) { Object.assign(e, { classe: '6e 7', site: 'SEGPA', dispositif: 'SEGPA', niveau: '6e' });
+      const nA = (s.affectations || []).length, nC = (s.creneaux || []).length;
+      s.affectations = (s.affectations || []).filter(x => !(x.eleveId === 'e80' && x.aeshId === 'a8'));
+      s.creneaux = (s.creneaux || []).filter(x => !(x.eleveId === 'e80' && x.aeshId === 'a8'));
+      (s.journal = s.journal || []).unshift({ date: new Date().toISOString(), type: 'eleve', texte: `${e.nom} ${e.prenom} : passe de la 6e 6 en 6e SEGPA (6e 7) ; AESH de la voie ordinaire retirée (${nA - s.affectations.length} affectation, ${nC - s.creneaux.length} créneaux)` }); } }
   if (!s.sortieTayara2611) { s.sortieTayara2611 = true; const L = s.aesh.filter(a => /\bTAYARA\b/i.test(a.nom || '')); if (L.length === 1 && !L[0].dateSortie) L[0].dateSortie = '2026-12-02'; }
   if (!s.couleurAli2511) { s.couleurAli2511 = true; s.aesh.forEach(a => { if (/\bnarya\b/i.test(a.nom || '') && /\bali\b/i.test(a.nom || '') && String(a.couleur || '').toUpperCase() === '#1F7A8C') a.couleur = '#C2477D'; }); }
   s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
