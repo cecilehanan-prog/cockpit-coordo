@@ -79,7 +79,7 @@ function appliquerEss() {
   return n;
 }
 const essMoment = e => e.essDate ? new Date(e.essDate + 'T' + (e.essHeure || '23:59') + ':00') : null;
-const jourDe = iso => JOURS_LONGS[(new Date(iso + 'T12:00:00').getDay() + 6) % 7];
+const jourDe = iso => ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'][(new Date(iso + 'T12:00:00').getDay() + 6) % 7] || ''; // 28/11 : samedi / dimanche aussi (une date de la cité peut commencer un dimanche)
 const heureTxt = h => h ? h.replace(':', 'h').replace(/h00$/, 'h00') : '';
 const essDeLaSemaine = lundi => { const fin = new Date(lundi + 'T12:00:00'); fin.setDate(fin.getDate() + 6); const f = isoLocal(fin); return S.eleves.filter(e => !e.archive && e.essDate && e.essDate >= lundi && e.essDate <= f).sort((a, b) => (a.essDate + (a.essHeure || '')).localeCompare(b.essDate + (b.essHeure || '')) || a.nom.localeCompare(b.nom)); };
 const aeshEss = e => affOf(e).filter(a => (a.heures ?? 0) > 0 || a.aConfirmer).map(a => aesh(a.aeshId)).filter(Boolean);
@@ -344,6 +344,52 @@ const DATES_EXAMS_PAYE_2027 = [
   { id: 'de-2027-07-06-resultats-bac', date: '2027-07-06', titre: 'Bac : résultats', detail: 'À partir du mardi 6 juillet. Rattrapages jusqu\'au vendredi 9 juillet.', source: 'Calendrier des examens 2027' },
   { id: 'de-2027-07-06-rattrapages', date: '2027-07-06', fin: '2027-07-09', titre: 'Bac : rattrapages', detail: 'Jusqu\'au vendredi 9 juillet', source: 'Calendrier des examens 2027' }
 ];
+/* 28/11 : « Dates à retenir 2026-2027 » de la cité scolaire (mise à jour du 13/11) et CFG (calendrier des examens 2027), envoyés par Hanan.
+   Appliqué une seule fois (drapeau datesCite1311) ; identifiants fixes, ce que Hanan modifie ou supprime ensuite n'est pas recréé.
+   Une date déjà présente le même jour avec un titre proche (CA collège, PHARE, Téléthon, COP, découverte des spécialités) n'est pas ajoutée en double. */
+const SRC_CITE_1311 = 'Dates à retenir 2026-2027 (cité scolaire, maj du 13/11/2026)';
+const DATES_CITE_1311 = [
+  ['2026-11-17', '', 'CVL : préparation du budget', ''],
+  ['2026-11-17', '', 'Prix de l\'excellence économique', ''],
+  ['2026-11-19', '', 'CA lycée (budget)', ''],
+  ['2026-11-26', '', 'CA collège (budget)', '', 'ca college'],
+  ['2026-11-26', '', 'Début des conseils de classe du 1er trimestre', ''],
+  ['2026-11-30', '', 'Formation PHARE collège', '', 'phare'],
+  ['2026-11-30', '2026-12-11', 'Stages de découverte des 2ndes (spécialités)', '', 'specialites'],
+  ['2026-12-04', '', 'Téléthon', '', 'telethon'],
+  ['2026-12-07', '2026-12-19', 'Élections professionnelles', 'Les AESH votent aussi : le rappeler à l\'équipe'],
+  ['2027-01-12', '2027-01-13', 'Bac blanc de français écrit', 'Penser aux aménagements (AESH des élèves de 1re)'],
+  ['2027-01-13', '', 'Devoir commun de management', ''],
+  ['2027-01-13', '', 'Devoir commun de SPC', ''],
+  ['2027-01-20', '', 'Devoir commun d\'éco-droit', ''],
+  ['2027-01-22', '', 'Bac blanc de philosophie (voie générale)', 'Penser aux aménagements (AESH)'],
+  ['2027-01-27', '2027-01-28', 'Journées de l\'enseignement supérieur', ''],
+  ['2027-01-29', '2027-02-05', 'Voyage en Italie (lycée)', ''],
+  ['2027-02-02', '', 'CA collège (préparation de la rentrée)', 'Sous réserve du calendrier académique'],
+  ['2027-02-04', '', 'CA lycée (préparation de la rentrée)', 'Sous réserve du calendrier académique'],
+  ['2027-02-04', '', 'Bac blanc de philosophie (voie technologique)', 'Penser aux aménagements (AESH)'],
+  ['2027-02-05', '', 'COP interne', '', 'cop'],
+  ['2027-02-09', '2027-02-11', 'Brevet blanc', 'Penser aux aménagements des élèves de 3e (AESH)'],
+  ['2027-03-01', '2027-03-05', 'Oraux du bac de français (1res GT)', ''],
+  ['2027-03-03', '2027-03-05', 'Bac blanc pro', 'Penser aux aménagements (AESH du lycée pro)'],
+  ['2027-03-08', '2027-03-12', 'Sortie ski des 2ndes', ''],
+  ['2027-03-08', '2027-03-09', 'Épreuves écrites du bac blanc (1res GT)', 'Penser aux aménagements (AESH)'],
+  ['2027-03-11', '2027-03-12', 'Bac blanc des Terminales GT', 'Penser aux aménagements (AESH)'],
+  ['2027-03-15', '2027-03-19', 'Voyage en Allemagne (lycée)', ''],
+  ['2027-03-26', '', 'Journée portes ouvertes du lycée pro', ''],
+  ['2027-04-02', '2027-04-09', 'Accueil des élèves italiens (lycée)', ''],
+  ['2027-04-04', '2027-04-09', 'Voyage en Espagne (lycée)', ''],
+  ['2027-04-05', '', 'CA collège (compte financier)', ''],
+  ['2027-04-08', '', 'CA lycée (compte financier)', ''],
+  ['2027-04-30', '', 'Journée portes ouvertes du collège (CM1 + CM2)', ''],
+  ['2027-06-28', '2027-07-02', 'Stages d\'observation des 4es', '']
+].map(([date, fin, titre, detail, deja]) => ({ id: 'de-' + date + '-' + titre.normalize('NFD').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase().replace(/^-|-$/g, '').slice(0, 40), date, fin, titre, detail, deja, source: SRC_CITE_1311 }))
+  .concat([['2027-06-15', 'CFG : épreuves écrites (1er jour)'], ['2027-06-17', 'CFG : épreuves écrites (2e jour)'], ['2027-06-18', 'CFG : épreuves écrites (3e jour)']]
+    .map(([date, titre]) => ({ id: 'de-' + date + '-cfg', date, fin: '', titre, detail: 'Certificat de formation générale : mardi 15, jeudi 17 et vendredi 18 juin. Penser aux aménagements d\'examen (AESH)', source: 'Calendrier des examens 2027' })));
+function appliquerDatesCite1311(s) {
+  const proche = (d, mot) => s.datesEtab.some(x => x.date === d.date && String(x.titre || '').normalize('NFD').replace(/[^A-Za-z ]/g, '').toLowerCase().includes(mot));
+  DATES_CITE_1311.forEach(({ deja, ...d }) => { if (s.datesEtab.some(x => x.id === d.id)) return; if (deja && proche(d, deja)) return; s.datesEtab.push({ heure: '', heureFin: '', ...d }); });
+}
 function appliquerDatesExamsPaye(s) { DATES_EXAMS_PAYE_2027.forEach(d => { if (!s.datesEtab.some(x => x.id === d.id)) s.datesEtab.push({ fin: '', heure: '', heureFin: '', ...d }); }); }
 // élèves suivis dans la classe du conseil (même nom de classe, sans tenir compte des espaces ni de « ULIS ») ; pour « TG + professeur », toutes les TG (groupe à vérifier)
 const ccNorm = s => normClasse(String(s || '').replace(/\bULIS\b/i, ''));
@@ -754,7 +800,8 @@ function migrate(s) {
   s.conseils = s.conseils || []; s.conseilsVus = s.conseilsVus || {}; s.conseilsNotif = s.conseilsNotif || {}; s.datesEtab = s.datesEtab || [];
   if (restaurerVus(s)) VUS_REMIS = true; garderSecoursVus(s); // 28/11 : un « Vu » ne se perd plus
   if (!s.actuCite8) { s.actuCite8 = true; appliquerActuCite8(s); } // 22/11 : conseils du 1er trimestre (heures, salles) et dates de la cité, d'après l'Actu cité n° 8
-  if (!s.datesExamsPaye2711) { s.datesExamsPaye2711 = true; appliquerDatesExamsPaye(s); } // 27/11 : examens 2027, dates de paye 2026-2027, DELF scolaire 2027
+  if (!s.datesExamsPaye2711) { s.datesExamsPaye2711 = true; appliquerDatesExamsPaye(s); } 
+  if (!s.datesCite1311) { s.datesCite1311 = true; appliquerDatesCite1311(s); } // 28/11 : dates à retenir de la cité (maj 13/11) et CFG 2027 // 27/11 : examens 2027, dates de paye 2026-2027, DELF scolaire 2027
   s.segmentsRempl = s.segmentsRempl || [];
   // historique des absences : une seule fiche par absence (aucun doublon quand les données de référence sont rechargées)
   s.aesh.forEach(a => { a.statut = motifNormalise(a.statut); }); s.absences.forEach(x => { x.motif = motifNormalise(x.motif); });
@@ -1840,9 +1887,9 @@ function weekGrid(blocks, big = false, onclickFn = 'editCreneau', conflictIds = 
     const byTime = {}; dayBlocks.forEach(b => { const k = b.debut + '|' + b.fin; (byTime[k] = byTime[k] || []).push(b); });
     return `<div class="col" style="--h:${H}px">${recreBlocks}${dayBlocks.map(b => {
     const top = (t2m(b.debut) - H0 * 60) / 60 * per, h = (t2m(b.fin) - t2m(b.debut)) / 60 * per;
-    const pair = byTime[b.debut + '|' + b.fin]; const isSplit = pair.length === 2;
+    const pair = byTime[b.debut + '|' + b.fin]; const isSplit = pair.length === 2 || !!b.cote;
     const isRight = isSplit && (b.groupe === 'Q2' || (b.groupe !== 'Q1' && pair.indexOf(b) === 1));
-    const side = isSplit ? (isRight ? 'left:51%;right:2px' : 'left:2px;right:51%') : 'left:2px;right:2px';
+    const side = b.cote ? (b.cote === 'd' ? 'left:51%;right:2px' : 'left:2px;right:51%') : isSplit ? (isRight ? 'left:51%;right:2px' : 'left:2px;right:51%') : 'left:2px;right:2px'; // b.cote : moitié imposée (cours Q1 à gauche, Q2 à droite)
     const cf = !isSplit && conflictIds && conflictIds.has(b.id);
     return `<div class="blk ${big ? 'big' : ''}${isSplit ? ' split' : ''}" style="${side};top:${top}px;height:${h - 2}px;background:${b.c};--c:${b.c};${cf ? 'outline:3px solid var(--bad);outline-offset:-3px' : ''}${b.remplace ? 'opacity:.5;border:2px dashed #fff' : ''}" title="${esc(b.title)}${cf ? ' ⚠ chevauchement' : ''}" onclick="${onclickFn}('${b.id}')">${cf ? '⚠ ' : ''}${esc(b.label)}${big && b.sub ? `<br><span style="opacity:.85">${esc(b.sub)}</span>` : ''}</div>`; }).join('')}</div>`; }).join('')}<div class="hours" style="--h:${H}px">${hours.join('')}</div></div>`;
 }
@@ -2048,6 +2095,29 @@ window.rechercheEleve = () => {
   q.oninput = maj; q.onkeydown = ev => { if (ev.key === 'Escape') fermer(); if (ev.key === 'Enter') { const d = res.querySelector('.re-item'); if (d) aller(d.dataset.id); } };
   document.addEventListener('mousedown', dehors, true); maj(); q.focus();
 };
+/* 28/11 : emploi du temps de la classe de l'élève (Pronote), importé par « Importer une mise à jour » (champ cours de la fiche).
+   Chaque cours : j (1-5), d / f (début / fin), q (Q1 / Q2, une semaine sur deux), per (S1 / S2 : semestre), m (matière), p (professeur), s (salle).
+   Les créneaux AESH du cockpit qui tombent pendant le cours sont indiqués sur le bloc. */
+const nomMatiere = m => { const t = String(m || '').toLowerCase().replace(/(^|[\s\-.(&'])([a-zà-ÿ])/g, (x, a, b) => a + b.toUpperCase()); return t.replace(/\bHist\.Geo\.En\.Mor\.Civ\./i, 'Histoire-géo / EMC').replace(/\bEd\.Physique & Sport\./i, 'EPS'); };
+function aeshPendantCours(e, c) {
+  return S.creneaux.filter(x => x.eleveId === e.id && +x.jour === +c.j && t2m(x.debut) < t2m(c.f) && t2m(x.fin) > t2m(c.d) && (!x.groupe || !c.q || x.groupe === c.q)).map(x => aesh(x.aeshId)).filter(Boolean);
+}
+function carteCoursClasse(e) {
+  const tous = Array.isArray(e.cours) ? e.cours : [];
+  if (!tous.length) return '';
+  const aSem = tous.some(c => c.per), sem = view.semestreCours || (aujourdhui() < '2027-02-01' ? 'S1' : 'S2'); // fin du 1er semestre au lycée : fin janvier (à ajuster)
+  const L = tous.map((c, i) => ({ c, i })).filter(x => !x.c.per || x.c.per === sem);
+  const bl = L.map(({ c, i }) => { const ae = [...new Set(aeshPendantCours(e, c).map(a => a.nom))]; const qq = [c.q, c.per].filter(Boolean).join(' · ');
+    return { id: e.id + '~' + i, jour: +c.j, debut: c.d, fin: c.f, groupe: c.q || undefined, cote: c.q === 'Q1' ? 'g' : c.q === 'Q2' ? 'd' : undefined, c: ae.length ? classeColor(e.classe) : '#9AA5B1',
+      label: nomMatiere(c.m), sub: [c.p, c.s, ae.length ? 'AESH : ' + ae.join(', ') : ''].filter(Boolean).join(' · '),
+      title: `${nomMatiere(c.m)} · ${JOURS[c.j - 1]} ${c.d}-${c.f}${qq ? ' (' + qq + ')' : ''}${c.p ? ' · ' + c.p : ''}${c.s ? ' · salle ' + c.s : ''}${ae.length ? ' · AESH : ' + ae.join(', ') : ' · pas d\'AESH prévue'}` }; });
+  const nbA = bl.filter(b => b.sub.includes('AESH : ')).length;
+  return `<div class="card" style="margin-top:14px" id="edt-classe"><h2>Emploi du temps de la classe <span class="small muted">${esc(e.classe)} · ${L.length} cours${aSem ? ' au ' + (sem === 'S1' ? '1er' : '2e') + ' semestre' : ''} · ${nbA} avec une AESH${e.coursMaj ? ' · Pronote, reçu le ' + frDate(e.coursMaj) : ''}</span></h2>
+    <p class="small muted" style="margin:0 0 8px">En couleur : cours où une AESH du cockpit est prévue (son nom est sur le bloc). En gris : sans AESH. Q1 / Q2 : une semaine sur deux. Clique sur un cours pour le détail.${aSem ? ` Certains cours changent au semestre : <a href="javascript:setView('semestreCours','${sem === 'S1' ? 'S2' : 'S1'}')">voir le ${sem === 'S1' ? '2e' : '1er'} semestre</a>.` : ''}</p>
+    ${weekGrid(bl, true, 'voirCoursClasse')}</div>`;
+}
+window.voirCoursClasse = id => { const [eid, i] = String(id).split('~'); const e = eleve(eid); const c = e && (e.cours || [])[+i]; if (!c) return; const ae = [...new Set(aeshPendantCours(e, c).map(a => a.nom))];
+  modal(`<h2>${esc(nomMatiere(c.m))}</h2><p>${JOURS[c.j - 1]} ${c.d.replace(':', 'h')} – ${c.f.replace(':', 'h')}${c.q ? ' · semaine ' + c.q : ' · toutes les semaines'}${c.per ? ' · ' + (c.per === 'S1' ? '1er semestre' : '2e semestre') + ' seulement' : ''}</p><dl class="dl"><dt>Professeur</dt><dd>${esc(c.p || '—')}</dd><dt>Salle</dt><dd>${esc(c.s || '—')}</dd><dt>AESH prévue</dt><dd>${ae.length ? esc(ae.join(', ')) : '<span class="muted">aucune dans le cockpit</span>'}</dd><dt>Élève</dt><dd>${esc(e.nom)} ${esc(e.prenom)} (${esc(e.classe)})</dd></dl>`, () => true); };
 function ficheEleve(id) {
   const e = eleve(id); if (!e) { location.hash = '#/eleves'; return; }
   setTitle(`${e.nom} ${e.prenom}`, `<a class="btn" href="#/pps/${id}">Document PPS</a> <button class="btn" onclick="exportWordEleve('${id}')">Word</button> <button class="btn" onclick="editEleve('${id}')">Modifier</button> <button class="btn ${e.archive ? '' : 'danger'}" onclick="archiverEleve('${id}')">${e.archive ? 'Restaurer' : 'Archiver'}</button>`);
@@ -2078,6 +2148,9 @@ function ficheEleve(id) {
    <div class="card"><h2>Emploi du temps d'accompagnement <button class="btn sm no-print" style="float:right" onclick="editCreneau(null,{eleveId:'${id}',aeshId:'${affs[0]?.aeshId || ''}'})">+ Créneau</button></h2>${(() => { const cf = chevauchements().filter(x => x.type === 'eleve' && x.id === id); const cfIds = new Set(cf.flatMap(x => [x.a.id, x.b.id]));
     return (cf.length ? `<div class="small" style="color:var(--bad);margin-bottom:6px">⚠ ${cf.length} chevauchement${cf.length > 1 ? 's' : ''} d'horaires (deux AESH prévues en même temps).</div>` : '') + (bl.length ? weekGrid(bl, true, 'editCreneau', cfIds) : '<div class="empty">Aucun créneau planifié.</div>'); })()}
     ${e.edt ? `<h3 style="margin-top:14px" id="edt-papier">Emploi du temps papier</h3><a href="edt-eleves/${encodeURIComponent(e.edt)}" target="_blank"><img src="edt-eleves/${encodeURIComponent(e.edt)}" alt="Emploi du temps de ${esc(e.nom)}" style="max-width:100%;border:1px solid var(--line);border-radius:8px;margin-top:6px"></a>` : ''}</div>
+  </div>
+  ${carteCoursClasse(e)}
+  <div class="grid g2" style="margin-top:14px">
    <div class="card"><h2>Historique</h2><ul class="journal" style="list-style:none;padding:0;margin:0">${hist.map(j => `<li><time>${new Date(j.date).toLocaleDateString('fr-FR')}</time>${esc(j.texte)}</li>`).join('') || '<li class="muted">Rien pour l\'instant.</li>'}</ul></div>
   </div>`;
 }
@@ -2610,8 +2683,8 @@ window.importEdtAesh = file => { if (!file) return; const r = new FileReader(); 
       <label class="f">AESH dans le cockpit<select name="a${i}">${optA(aId)}</select></label>${aId ? '' : `<div class="small" style="color:var(--warn)">${ca.length ? 'plusieurs AESH possibles' : 'AESH non trouvée'} : choisis-la</div>`}
       <table class="t compact" style="margin-top:8px"><thead><tr><th>Dans le fichier</th><th>Élève dans le cockpit</th><th class="num">Heures</th></tr></thead><tbody>${lignes}</tbody></table>
       <div class="small muted">${x.creneaux.length} créneaux${x.note ? ' · ' + esc(x.note) : ''}</div></div>`; }).join('');
-  const LIB_CHAMPS = { notifDebut: 'Début notification', notifFin: 'Fin notification', gevasco: 'GEVASCO (validité)', gevascoDate: 'Dernière réunion GEVASCO', heures: "Heures à couvrir", statut: 'Statut du dossier' };
-  const valTxt = (k, v) => v == null || v === '' ? '—' : /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? frDate(v) : k === 'heures' ? hf(v) : esc(v);
+  const LIB_CHAMPS = { cours: 'Emploi du temps de la classe', coursMaj: 'EDT de classe reçu le', notifDebut: 'Début notification', notifFin: 'Fin notification', gevasco: 'GEVASCO (validité)', gevascoDate: 'Dernière réunion GEVASCO', heures: "Heures à couvrir", statut: 'Statut du dossier' };
+  const valTxt = (k, v) => Array.isArray(v) ? (v.length ? v.length + ' cours' : '—') : v == null || v === '' ? '—' : /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? frDate(v) : k === 'heures' ? hf(v) : esc(v);
   const blocsE = d.eleves.length ? `<div class="card" style="margin:10px 0"><h3 style="margin:0 0 6px">Fiches élèves</h3><table class="t compact"><thead><tr><th>Dans le fichier</th><th>Élève dans le cockpit</th><th>Changements</th></tr></thead><tbody>${d.eleves.map((x, i) => { const ce = trouverEleve(x.eleve, x.classe); const e0 = ce.length === 1 ? ce[0] : null;
       const nv = x.nouveau && !ce.length;
       return `<tr><td><b>${esc(x.eleve)}</b>${x.note ? `<div class="small muted">${esc(x.note)}</div>` : ''}</td><td><select name="fe${i}">${x.nouveau ? `<option value="__nouveau" ${nv ? 'selected' : ''}>➕ Créer la fiche (${esc(x.nouveau.classe || '')})</option>` : ''}${optE(e0 && !nv ? e0.id : '').replace(nv ? ' selected' : '\u0000', '')}</select>${e0 || nv ? '' : `<div class="small" style="color:var(--warn)">${ce.length ? 'plusieurs élèves possibles' : 'élève non trouvé'} : choisis-le</div>`}${nv ? '<div class="small muted">nouvel élève : la fiche sera créée</div>' : ''}</td><td class="small">${Object.entries(x.champs || {}).map(([k, v]) => `<label style="display:block"><input type="checkbox" name="fc${i}_${k}" checked> ${esc(LIB_CHAMPS[k] || k)} : ${e0 ? valTxt(k, e0[k]) + ' → ' : ''}<b>${valTxt(k, v)}</b></label>`).join('')}${Array.isArray(x.suivis) && x.suivis.length ? `<label style="display:block"><input type="checkbox" name="fs${i}" checked> Suivis médicaux : ${x.suivis.map(su => { const deja = e0 && (e0.suivis || []).some(y => nrmNom(y.nom) === nrmNom(su.nom)); return `<b>${esc(su.nom)}</b>${su.detail ? ' (' + esc(su.detail) + ')' : ''}${deja ? ' <span class="muted">déjà noté</span>' : ''}`; }).join(', ')}</label>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '';
@@ -2653,7 +2726,7 @@ function appliquerEdtAesh(f) {
     const af = S.affectations.find(y => y.aeshId === aId && y.eleveId === eid); if (af) { af.heures = h; af.aConfirmer = false; } else S.affectations.push({ eleveId: eid, aeshId: aId, heures: h, aConfirmer: false });
     resume.push(`${a.nom} ajoutée à ${e.nom} ${e.prenom} (${hf(h)})`); });
   d.eleves.forEach((x, i) => { const e = eleve(f['fe' + i]); if (!e) return; const ch = [];
-    Object.entries(x.champs || {}).forEach(([k, v]) => { if (!f['fc' + i + '_' + k]) return; const old = e[k]; if (String(old ?? '') === String(v ?? '')) return; e[k] = v; if (CHAMPS_DOSSIER.includes(k)) { (e.manuel = e.manuel || {})[k] = true; if (e.auto) delete e.auto[k]; } if (k === 'statut') e.statutManuel = true; ch.push(`${k} ${old ?? '—'} → ${v ?? '—'}`); });
+    Object.entries(x.champs || {}).forEach(([k, v]) => { if (!f['fc' + i + '_' + k]) return; const old = e[k]; const txt = y => y != null && typeof y === 'object' ? JSON.stringify(y) : String(y ?? ''); if (txt(old) === txt(v)) return; e[k] = v; if (Array.isArray(v)) { ch.push(`${k === "cours" ? "emploi du temps de la classe" : k} : ${v.length} cours`); return; } if (CHAMPS_DOSSIER.includes(k)) { (e.manuel = e.manuel || {})[k] = true; if (e.auto) delete e.auto[k]; } if (k === 'statut') e.statutManuel = true; ch.push(`${k} ${old ?? '—'} → ${v ?? '—'}`); });
     if (ch.length && x.champs && x.champs.notifFin && !x.champs.statut && e.statutManuel && isPending(e)) e.statutManuel = false;
     const chS = Array.isArray(x.suivis) && f['fs' + i] ? fusionSuivis(e, x.suivis) : [];
     if (ch.length || chS.length) { log('eleve', `${e.nom} ${e.prenom} : ${ch.concat(chS.map(t => 'suivi ' + t)).join(', ')} (mise à jour préparée)`); resume.push(`${e.nom} ${e.prenom} : ${[ch.length ? `${ch.length} champ${ch.length > 1 ? 's' : ''} mis à jour` : '', chS.length ? `${chS.length} suivi${chS.length > 1 ? 's' : ''} médica${chS.length > 1 ? 'ux' : 'l'} ajouté${chS.length > 1 ? 's' : ''} ou complété${chS.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(', ')}`); } });
