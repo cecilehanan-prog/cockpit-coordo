@@ -2910,6 +2910,164 @@ function modal(html, onSave, onDelete) {
 }
 window.closeModal = () => { $('#modal').innerHTML = ''; document.onkeydown = null; setTimeout(appliquerSyncEnAttente, 0); };
 
+/* ====================== QUI SUIT QUI (PDF à imprimer ou à envoyer aux profs) — 28/11 ======================
+   Demande de Hanan : bouton en accès direct (barre du haut, sur toutes les pages, aussi sur téléphone) pour imprimer ou enregistrer en PDF :
+   1) par AESH (AESH / élèves / classes) ; 2) par classe (classe / élèves / AESH) ; 3) une fiche par classe, à remettre ou envoyer au prof,
+   avec l'AESH et son e-mail (champ E-mail de la fiche AESH) en face de chaque élève.
+   Même règle que le PDF du 20/11 : voie ordinaire seulement (hors SEGPA et ULIS du collège ; ULIS du lycée pro gardée), sans heures ni type.
+   AESH comptées : équipe actuelle (pas les sorties), hors arrêt longue durée ; affectations avec des heures (ou à confirmer),
+   sinon toutes celles de l'élève. Les élèves sans AESH n'apparaissent pas. */
+const nomPrenomAesh = a => { const p = String(a.nom || '').trim().split(/\s+/); return p.length > 1 ? p.slice(1).join(' ') + ' ' + p[0] : (a.nom || ''); };
+const nomPrenomEleve = e => `${e.nom || ''} ${e.prenom || ''}`.trim();
+const triFr = (x, y) => String(x).localeCompare(String(y), 'fr', { numeric: true, sensitivity: 'base' });
+function qsqLiens() {
+  const L = [];
+  S.eleves.filter(e => isActive(e) && !dispositifDe(e)).forEach(e => {
+    const affs = affOf(e).filter(x => { const a = aesh(x.aeshId); return a && !sortieAesh(a) && !a.longueDuree; });
+    const vrais = affs.filter(x => (x.heures || 0) > 0 || x.aConfirmer);
+    const vus = new Set();
+    (vrais.length ? vrais : affs).forEach(x => { if (vus.has(x.aeshId)) return; vus.add(x.aeshId); L.push({ e, a: aesh(x.aeshId) }); });
+  });
+  return L;
+}
+const qsqCleClasse = e => { const c = (S.classes || []).find(k => k.nom === e.classe) || e; const s = SITES.indexOf(c.site || e.site), n = NIVEAUX.indexOf(c.niveau || e.niveau); return [s < 0 ? 99 : s, n < 0 ? 99 : n]; };
+const qsqTriClasses = (p, q) => { const a = qsqCleClasse(p), b = qsqCleClasse(q); return a[0] - b[0] || a[1] - b[1] || triFr(p.classe, q.classe); };
+function qsqParClasse(L = qsqLiens()) {
+  const par = new Map();
+  L.forEach(({ e, a }) => { const c = e.classe || '(sans classe)'; if (!par.has(c)) par.set(c, { classe: c, ex: e, el: new Map() }); const C = par.get(c); if (!C.el.has(e.id)) C.el.set(e.id, { e, aesh: [] }); C.el.get(e.id).aesh.push(a); });
+  return [...par.values()].sort((x, y) => qsqTriClasses(x.ex, y.ex)).map(C => ({ classe: C.classe, eleves: [...C.el.values()].sort((x, y) => triFr(nomPrenomEleve(x.e), nomPrenomEleve(y.e))).map(x => ({ e: x.e, aesh: x.aesh.sort((p, q) => triFr(nomPrenomAesh(p), nomPrenomAesh(q))) })) }));
+}
+function qsqParAesh(L = qsqLiens()) {
+  const par = new Map();
+  L.forEach(({ e, a }) => { if (!par.has(a.id)) par.set(a.id, { a, el: [] }); par.get(a.id).el.push(e); });
+  return [...par.values()].sort((x, y) => triFr(nomPrenomAesh(x.a), nomPrenomAesh(y.a))).map(G => ({ a: G.a, eleves: G.el.sort((p, q) => triFr(nomPrenomEleve(p), nomPrenomEleve(q))) }));
+}
+const qsqCoordo = () => equipe().find(a => /\bc[ée]cile\b/i.test(a.nom || '') && /\bbodin\b/i.test(a.nom || ''));
+const qsqAnnee = () => { const m = String((S.calendrier && S.calendrier.annee) || S.annee || '').match(/(\d{4})\D+(\d{4})/); return m ? m[1] + '-' + m[2] : ''; };
+const qsqSousTitre = () => ['Cité scolaire', qsqAnnee() ? 'année ' + qsqAnnee() : '', 'état au ' + new Date().toLocaleDateString('fr-FR'), 'élèves suivis en voie ordinaire (hors SEGPA et ULIS du collège)'].filter(Boolean).join(' · ');
+const qsqMail = a => a.email ? `<a href="mailto:${esc(a.email)}">${esc(a.email)}</a>` : '<span class="qsq-manque">e-mail à compléter</span>';
+const QSQ_CSS = `
+#qsq-print{display:none}
+.topbar>.btn.qsq-btn{display:inline-flex}
+@media print{
+  body.print-qsq #app,body.print-qsq #bottombar,body.print-qsq #modal,body.print-qsq #edt-print-render,body.print-qsq .boite-ui,body.print-qsq .toast{display:none!important}
+  body.print-qsq #qsq-print{display:block!important}
+}
+#qsq-print{font:12px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#111;background:#fff}
+#qsq-print h1{font-size:19px;margin:0 0 3px}
+#qsq-print .qsq-st{font-size:10.5px;color:#555;margin:0 0 12px}
+#qsq-print table{width:100%;border-collapse:collapse}
+#qsq-print th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#37667F;border-bottom:2px solid #37667F;padding:5px 6px}
+#qsq-print td{padding:4px 6px;border-bottom:1px solid #DDE3EA;vertical-align:top}
+#qsq-print tbody{break-inside:avoid;page-break-inside:avoid}
+#qsq-print tbody tr:first-child td{border-top:1px solid #9AA8B6}
+#qsq-print .qsq-g{font-weight:700}
+#qsq-print .qsq-g small{display:block;font-weight:400;color:#666;font-size:10px}
+#qsq-print .qsq-pied{margin-top:14px;font-size:10.5px;color:#555}
+#qsq-print .qsq-manque{color:#B5403A;font-style:italic}
+#qsq-print a{color:inherit;text-decoration:none}
+#qsq-print .qsq-fiche{break-after:page;page-break-after:always}
+#qsq-print .qsq-fiche:last-child{break-after:auto;page-break-after:auto}
+#qsq-print .qsq-fiche h1{font-size:24px;color:#37667F}
+#qsq-print .qsq-fiche table{font-size:14px}
+#qsq-print .qsq-fiche td{padding:7px 8px}
+#qsq-print .qsq-fiche .qsq-ligne+.qsq-ligne{margin-top:5px}
+#qsq-print .qsq-intro{font-size:13px;margin:0 0 12px}
+.qsq-classes{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:4px 10px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:6px}
+.qsq-classes label{display:flex;gap:6px;align-items:center;font-size:13px;white-space:nowrap}
+.qsq-vues label.qsq-vue{display:flex;gap:10px;align-items:flex-start;padding:9px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;cursor:pointer}
+.qsq-vues label.qsq-vue:has(input:checked){border-color:var(--primary);background:#F2F5FB}
+.qsq-vues label.qsq-vue span small{display:block;color:var(--muted);font-weight:400}
+`;
+function qsqStyle() { if (document.getElementById('qsq-style')) return; const s = document.createElement('style'); s.id = 'qsq-style'; s.textContent = QSQ_CSS; document.head.appendChild(s); }
+function qsqHtmlAesh() {
+  const G = qsqParAesh();
+  const corps = G.map(g => g.eleves.map((e, i) => `<tr>${i ? '<td></td>' : `<td class="qsq-g">${esc(nomPrenomAesh(g.a))}${g.a.dispositif ? `<small>AESH ${esc(g.a.dispositif)} (heures en voie ordinaire)</small>` : ''}</td>`}<td>${esc(nomPrenomEleve(e))}</td><td>${esc(e.classe)}</td></tr>`).join('')).map(r => `<tbody>${r}</tbody>`).join('');
+  return { n: G.length, titre: 'AESH-par-AESH', html: `<h1>AESH et élèves suivis</h1><p class="qsq-st">${esc(qsqSousTitre())} · document interne</p>
+    <table><thead><tr><th style="width:34%">AESH</th><th style="width:44%">Élève suivi</th><th>Classe</th></tr></thead>${corps || '<tbody><tr><td colspan="3">Aucun élève suivi.</td></tr></tbody>'}</table>` };
+}
+function qsqHtmlClasses() {
+  const C = qsqParClasse();
+  const corps = C.map(c => c.eleves.map((x, i) => `<tr>${i ? '<td></td>' : `<td class="qsq-g">${esc(c.classe)}</td>`}<td>${esc(nomPrenomEleve(x.e))}</td><td>${x.aesh.map(a => esc(nomPrenomAesh(a))).join('<br>')}</td></tr>`).join('')).map(r => `<tbody>${r}</tbody>`).join('');
+  return { n: C.length, titre: 'AESH-par-classe', html: `<h1>Élèves suivis et AESH, par classe</h1><p class="qsq-st">${esc(qsqSousTitre())} · document interne</p>
+    <table><thead><tr><th style="width:18%">Classe</th><th style="width:42%">Élève suivi</th><th>AESH</th></tr></thead>${corps || '<tbody><tr><td colspan="3">Aucun élève suivi.</td></tr></tbody>'}</table>` };
+}
+function qsqPied() { const c = qsqCoordo(); return `<p class="qsq-pied">Coordination AESH : Cécile BODIN${c && c.email ? ' · ' + esc(c.email) : ''}. Document à usage interne, à ne pas afficher.</p>`; }
+function qsqHtmlFiches(classes) {
+  const C = qsqParClasse().filter(c => !classes || classes.includes(c.classe));
+  const fiches = C.map(c => `<section class="qsq-fiche"><h1>Classe de ${esc(c.classe)}</h1><p class="qsq-st">AESH qui accompagnent des élèves de la classe · ${qsqAnnee() ? 'année ' + qsqAnnee() + ' · ' : ''}état au ${new Date().toLocaleDateString('fr-FR')}</p>
+    <p class="qsq-intro">Pour toute question sur l'accompagnement d'un élève, vous pouvez écrire directement à son AESH.</p>
+    <table><thead><tr><th style="width:36%">Élève</th><th style="width:28%">AESH</th><th>E-mail de l'AESH</th></tr></thead>
+    ${c.eleves.map(x => `<tbody><tr><td class="qsq-g">${esc(nomPrenomEleve(x.e))}</td><td>${x.aesh.map(a => `<div class="qsq-ligne">${esc(a.nom)}</div>`).join('')}</td><td>${x.aesh.map(a => `<div class="qsq-ligne">${qsqMail(a)}</div>`).join('')}</td></tr></tbody>`).join('')}</table>${qsqPied()}</section>`).join('');
+  return { n: C.length, titre: classes && classes.length === 1 ? 'AESH-classe-' + classes[0].replace(/\s+/g, '') : 'AESH-fiches-par-classe', html: fiches || '<p>Aucune classe choisie.</p>' };
+}
+function qsqImprimer(doc) {
+  qsqStyle();
+  let h = document.getElementById('qsq-print'); if (!h) { h = document.createElement('div'); h.id = 'qsq-print'; document.body.appendChild(h); }
+  h.innerHTML = doc.html;
+  const titreAvant = document.title; document.title = doc.titre + '_' + aujourdhui();
+  const pg = document.createElement('style'); pg.textContent = '@media print{@page{size:A4 portrait;margin:12mm}}'; document.head.appendChild(pg); // le reste de l'appli imprime en paysage (EDT)
+  const fini = () => { document.body.classList.remove('print-qsq'); h.innerHTML = ''; document.title = titreAvant; pg.remove(); window.removeEventListener('afterprint', fini); };
+  document.body.classList.add('print-qsq'); window.addEventListener('afterprint', fini);
+  setTimeout(() => { try { window.print(); } catch (e) { fini(); alert("L'impression n'a pas pu s'ouvrir sur cet appareil."); } }, 60);
+}
+function qsqTexteMail(c) {
+  const lignes = c.eleves.map(x => `- ${nomPrenomEleve(x.e)} : ${x.aesh.map(a => a.nom + (a.email ? ' (' + a.email + ')' : '')).join(' et ')}`);
+  return `Bonjour,\n\nVoici les AESH qui accompagnent des élèves de la classe de ${c.classe} (état au ${new Date().toLocaleDateString('fr-FR')}) :\n\n${lignes.join('\n')}\n\nPour toute question sur l'accompagnement d'un élève, vous pouvez écrire directement à son AESH.\n\nCordialement,\nCécile BODIN\nCoordination AESH`;
+}
+window.qsqOuvrir = () => {
+  qsqStyle();
+  const C = qsqParClasse(), G = qsqParAesh();
+  const sansMail = G.filter(g => !g.a.email).map(g => g.a.nom);
+  const choisies = (() => { try { return JSON.parse(localStorage.getItem('cockpit-qsq-classes') || 'null'); } catch (e) { return null; } })();
+  $('#modal').innerHTML = `<div class="modal-bg no-print" onclick="if(event.target===this)closeModal()"><div class="modal qsq-vues" role="dialog" style="width:min(620px,94vw)">
+    <h2>Qui suit qui : PDF à imprimer</h2>
+    <p class="small muted" style="margin:-6px 0 12px">Voie ordinaire seulement (hors SEGPA et ULIS du collège), sans heures ni type. ${G.length} AESH, ${C.length} classes, ${C.reduce((t, c) => t + c.eleves.length, 0)} élèves.</p>
+    <label class="qsq-vue"><input type="radio" name="qsq-vue" value="aesh"><span><b>Par AESH</b><small>AESH, élèves suivis, classes</small></span></label>
+    <label class="qsq-vue"><input type="radio" name="qsq-vue" value="classes"><span><b>Par classe</b><small>Classe, élèves suivis, AESH : une seule liste pour toutes les classes</small></span></label>
+    <label class="qsq-vue"><input type="radio" name="qsq-vue" value="fiches" checked><span><b>Une fiche par classe, pour le prof</b><small>Une page par classe : chaque élève avec son AESH et l'e-mail de l'AESH</small></span></label>
+    <div id="qsq-choix-classes">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b class="small">Classes</b><button type="button" class="btn" style="padding:3px 9px" onclick="qsqCocher(true)">Toutes</button><button type="button" class="btn" style="padding:3px 9px" onclick="qsqCocher(false)">Aucune</button><span class="small muted" id="qsq-nb"></span></div>
+      <div class="qsq-classes">${C.map(c => `<label><input type="checkbox" value="${esc(c.classe)}" ${!choisies || choisies.includes(c.classe) ? 'checked' : ''} onchange="qsqMaj()">${esc(c.classe)} <span class="small muted">(${c.eleves.length})</span></label>`).join('')}</div>
+      <p class="small muted" style="margin:6px 0 0">Une seule classe cochée : le bouton « Mail au prof » prépare aussi le message (le PDF est à joindre).</p>
+    </div>
+    ${sansMail.length ? `<p class="small" style="margin:10px 0 0;color:var(--bad,#B5403A)">E-mail manquant dans la fiche AESH de : ${sansMail.map(esc).join(', ')}. À compléter dans AESH › fiche › E-mail.</p>` : ''}
+    <p class="small muted" style="margin:10px 0 0">Dans la fenêtre d'impression, choisis « Enregistrer en PDF » pour l'envoyer par e-mail.</p>
+    <div class="acts"><button type="button" class="btn" onclick="closeModal()">Fermer</button><button type="button" class="btn" id="qsq-mail" onclick="qsqMailProf()" style="display:none">Mail au prof</button><button type="button" class="btn primary" onclick="qsqGo()">Imprimer / PDF</button></div>
+  </div></div>`;
+  document.querySelectorAll('input[name="qsq-vue"]').forEach(r => r.onchange = qsqMaj);
+  document.onkeydown = e => { if (e.key === 'Escape') closeModal(); };
+  qsqMaj();
+};
+const qsqVue = () => (document.querySelector('input[name="qsq-vue"]:checked') || {}).value || 'fiches';
+const qsqCochees = () => [...document.querySelectorAll('.qsq-classes input:checked')].map(i => i.value);
+window.qsqCocher = oui => { document.querySelectorAll('.qsq-classes input').forEach(i => { i.checked = oui; }); qsqMaj(); };
+window.qsqMaj = () => {
+  const f = qsqVue() === 'fiches', n = qsqCochees().length, z = document.getElementById('qsq-choix-classes'), m = document.getElementById('qsq-mail'), nb = document.getElementById('qsq-nb');
+  if (z) z.style.display = f ? '' : 'none'; if (m) m.style.display = f && n === 1 ? '' : 'none';
+  if (nb) nb.textContent = n + ' classe' + (n > 1 ? 's' : '') + ' cochée' + (n > 1 ? 's' : '') + ' = ' + n + ' page' + (n > 1 ? 's' : '');
+};
+window.qsqGo = () => {
+  const v = qsqVue();
+  if (v === 'fiches') { const L = qsqCochees(); if (!L.length) return toast('Coche au moins une classe');
+    try { localStorage.setItem('cockpit-qsq-classes', JSON.stringify(L)); } catch (e) { }
+    closeModal(); return qsqImprimer(qsqHtmlFiches(L)); }
+  closeModal(); qsqImprimer(v === 'aesh' ? qsqHtmlAesh() : qsqHtmlClasses());
+};
+window.qsqMailProf = () => {
+  const L = qsqCochees(); if (L.length !== 1) return; const c = qsqParClasse().find(k => k.classe === L[0]); if (!c) return;
+  const a = document.createElement('a'); a.href = `mailto:?subject=${encodeURIComponent('AESH de la classe de ' + c.classe)}&body=${encodeURIComponent(qsqTexteMail(c))}`; document.body.appendChild(a); a.click(); a.remove();
+};
+// bouton dans la barre du haut (toutes les pages, aussi sur téléphone) ; ajouté ici pour que l'appli Mac (index.html local) l'ait aussi
+(function qsqBouton() {
+  qsqStyle();
+  const bar = document.querySelector('.topbar'); if (!bar || bar.querySelector('.qsq-btn')) return;
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'btn qsq-btn'; b.title = 'PDF : quelles AESH suivent quels élèves (par AESH, par classe, fiche par classe pour les profs)';
+  b.innerHTML = '<span aria-hidden="true">👥</span> Qui suit qui'; b.onclick = () => window.qsqOuvrir();
+  const imp = [...bar.querySelectorAll('button')].find(x => /window\.print/.test(x.getAttribute('onclick') || ''));
+  bar.insertBefore(b, imp || null);
+})();
+
 /* ====================== INIT ====================== */
 load(); if (NUMEROS_DONNES) { log('eleve', `Numéros de fiche donnés automatiquement : ${NUMEROS_DONNES} élève${NUMEROS_DONNES > 1 ? 's' : ''}`); save(); } if (DOUBLONS_FUSIONNES.length) { log('eleve', 'Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')); save(); setTimeout(() => toast('Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')), 800); } { const nd = appliquerDossiers() + appliquerEss() + appliquerStatuts(); if (nd) { log('eleve', 'Fiches élèves mises à jour d\'après les documents (PPS, MOPPS, notifications, GEVASCO…)'); save(); } } chargerDossiers(); if (synchroDispositifs()) { log('affectation', 'Élèves ULIS / SEGPA rattachés automatiquement aux AESH de leur dispositif'); save(); } render(); verifierRetours(); essVerifierRappel(); setInterval(essVerifierRappel, 60000); ccVerifierRappel(); setInterval(ccVerifierRappel, 60000);
 setInterval(verifierRetours, 3600 * 1000); evalsActualiser(true); prisesActualiser(true); setInterval(() => { evalsActualiser(true); prisesActualiser(true); }, 120000); setTimeout(() => { if (serveurOK()) publierAuto(); }, 4000); setInterval(() => { if (serveurOK() && S.pubJour !== aujourdhui()) publierAuto(); }, 600000); document.addEventListener('visibilitychange', () => { if (!document.hidden) { verifierRetours(); chargerDossiers(); } });
