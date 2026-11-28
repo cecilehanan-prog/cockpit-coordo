@@ -354,7 +354,7 @@ function ccEleves(c) {
 const ccElevesHtml = (c, court) => { const E = ccEleves(c); if (!E.length) return '<span class="muted">—</span>'; const groupe = /^tg$/.test(ccNorm(c.classe));
   return E.map(e => { const A = aeshEss(e); return `<span style="white-space:nowrap"><a href="#/eleves/${e.id}" onclick="event.stopPropagation()" style="color:inherit"><b>${esc(e.nom)}</b> ${esc(e.prenom)}</a>${groupe ? ` <span class="muted">(${esc(e.classe)})</span>` : ''}${!court && A.length ? ' · ' + A.map(a => `<span class="dot" style="background:${couleurAesh(a)}"></span>${esc(a.nom.split(' ')[0])}`).join(', ') : ''}</span>`; }).join('<br>') + (groupe ? '<div class="muted" style="font-size:11px">groupe à vérifier</div>' : ''); };
 window.ccVuSemaine = lundi => { S.conseilsVus['sem:' + lundi] = new Date().toISOString(); commit('ess', `Rappel des conseils de classe de la semaine du ${frDate(lundi)} marqué comme vu`); };
-window.ccRevoirSemaine = lundi => { delete S.conseilsVus['sem:' + lundi]; commit('ess', `Rappel des conseils de classe de la semaine du ${frDate(lundi)} remis`); };
+window.ccRevoirSemaine = lundi => { delete S.conseilsVus['sem:' + lundi]; oublierVu('cc', 'sem:' + lundi); commit('ess', `Rappel des conseils de classe de la semaine du ${frDate(lundi)} remis`); };
 function ccVerifierRappel() {
   try { const r = ccRappel(); if ((r.L.length || r.D.length) && !S.conseilsNotif['sem:' + r.lundi]) { S.conseilsNotif['sem:' + r.lundi] = new Date().toISOString(); save();
     toast([r.L.length ? `${r.L.length} conseil${r.L.length > 1 ? 's' : ''} de classe` : '', r.D.length ? `${r.D.length} date${r.D.length > 1 ? 's' : ''} de la cité` : ''].filter(Boolean).join(' et ') + ` la semaine du ${frCourt(r.lundi)}`);
@@ -627,6 +627,44 @@ function load() {
   S = migrate(JSON.parse(JSON.stringify(seed)));
 }
 const QUESTIONS_INITIALES = []; // version en ligne : questions nominatives retirées
+/* 28/11 : filet de sécurité des « Questions à poser ». Chaque question vue sur cet appareil est aussi gardée à part (cockpit-questions-secours).
+   Une question ne disparaît plus que si elle est supprimée avec ✕ (son id est alors noté dans questionsSupprimees, qui suit la synchro).
+   Si une synchro ou un enregistrement raté la fait disparaître, elle est remise automatiquement (et repart vers les autres appareils). */
+const Q_SECOURS = 'cockpit-questions-secours';
+let QUESTIONS_REMISES = 0, VUS_REMIS = false;
+/* 28/11 : même filet pour les « Vu » (rappels d'ESS, conseils de classe de la semaine, remplacements, retours et annulations) :
+   un rappel marqué « Vu » ne revient plus, même si une synchro ramène une version plus ancienne. « Revoir » le remet vraiment. */
+const VUS_SECOURS = 'cockpit-vus-secours';
+function lireSecoursVus() { try { const o = JSON.parse(localStorage.getItem(VUS_SECOURS) || '{}') || {}; return { ess: o.ess || {}, cc: o.cc || {}, prises: o.prises || [], abs: o.abs || [] }; } catch (e) { return { ess: {}, cc: {}, prises: [], abs: [] }; } }
+function garderSecoursVus(s) {
+  if (!s) return; const v = lireSecoursVus(), avant = JSON.stringify(v);
+  Object.entries(s.essVus || {}).forEach(([k, d]) => { if (d) v.ess[k] = d; }); Object.entries(s.conseilsVus || {}).forEach(([k, d]) => { if (d) v.cc[k] = d; });
+  (s.prisesVues || []).forEach(id => { if (!v.prises.includes(id)) v.prises.push(id); }); (s.alertesAbs || []).forEach(x => { if (x && x.vu && !v.abs.includes(x.id)) v.abs.push(x.id); });
+  v.prises = v.prises.slice(-400); v.abs = v.abs.slice(-200);
+  if (JSON.stringify(v) !== avant) try { localStorage.setItem(VUS_SECOURS, JSON.stringify(v)); } catch (e) { }
+}
+function restaurerVus(s) {
+  const v = lireSecoursVus(); let n = 0; s.essVus = s.essVus || {}; s.conseilsVus = s.conseilsVus || {};
+  Object.entries(v.ess).forEach(([k, d]) => { if (!s.essVus[k]) { s.essVus[k] = d; n++; } }); Object.entries(v.cc).forEach(([k, d]) => { if (!s.conseilsVus[k]) { s.conseilsVus[k] = d; n++; } });
+  if (Array.isArray(s.prisesVues)) { const occ = new Set((s.prisesOcc || []).map(p => p.occId)); v.prises.forEach(id => { if (occ.has(id) && !s.prisesVues.includes(id)) { s.prisesVues.push(id); n++; } }); }
+  (s.alertesAbs || []).forEach(x => { if (x && !x.vu && v.abs.includes(x.id)) { x.vu = true; n++; } });
+  if (n) s._savedAt = new Date().toISOString();
+  return n;
+}
+function oublierVu(type, k) { const v = lireSecoursVus(); if (type === 'cc') delete v.cc[k]; else if (type === 'ess') delete v.ess[k]; try { localStorage.setItem(VUS_SECOURS, JSON.stringify(v)); } catch (e) { } }
+function lireSecoursQ() { try { return JSON.parse(localStorage.getItem(Q_SECOURS) || '{}') || {}; } catch (e) { return {}; } }
+function garderSecoursQ(s) {
+  if (!s || !Array.isArray(s.questions)) return; const sec = lireSecoursQ(), sup = new Set(s.questionsSupprimees || []); let ch = false;
+  s.questions.forEach(q => { if (q && q.id && JSON.stringify(sec[q.id]) !== JSON.stringify(q)) { sec[q.id] = { ...q }; ch = true; } });
+  Object.keys(sec).forEach(id => { if (sup.has(id)) { delete sec[id]; ch = true; } });
+  if (ch) try { localStorage.setItem(Q_SECOURS, JSON.stringify(sec)); } catch (e) { }
+}
+function restaurerQuestions(s) {
+  const sec = lireSecoursQ(), sup = new Set(s.questionsSupprimees || []), ids = new Set(s.questions.map(q => q.id)); let n = 0;
+  Object.values(sec).forEach(q => { if (q && q.id && !ids.has(q.id) && !sup.has(q.id)) { s.questions.push({ ...q }); ids.add(q.id); n++; } });
+  if (n) { s.questions.sort((a, b) => String(b.creeLe || '').localeCompare(String(a.creeLe || ''))); s.journal = s.journal || []; s.journal.unshift({ date: new Date().toISOString(), type: 'question', texte: `Questions à poser remises automatiquement : ${n}` }); s._savedAt = new Date().toISOString(); }
+  return n;
+}
 // répartitions « à confirmer » confirmées par un clic : retenues (élève + AESH + heures) même quand les données de référence sont rechargées ; si les heures changent, la confirmation est à refaire
 function cleAff(x) { return x.eleveId + '|' + x.aeshId + '|' + (x.heures ?? 0); }
 /* ---- Doublons d'élèves (20/11) : même NOM + prénom = une seule fiche. Arrivaient quand le même fichier était importé sur deux
@@ -711,8 +749,10 @@ function migrate(s) {
   // questions ajoutées par Claude : chaque question n'est ajoutée qu'une fois (suivi dans questionsAjoutees), ce que Cécile supprime ou coche n'est pas recréé
   s.questionsAjoutees = s.questionsAjoutees || ['q1'];
   QUESTIONS_INITIALES.forEach(q => { if (!s.questionsAjoutees.includes(q.id) && !s.questions.some(x => x.id === q.id)) { s.questions.push({ ...q }); } if (!s.questionsAjoutees.includes(q.id)) s.questionsAjoutees.push(q.id); });
+  s.questionsSupprimees = s.questionsSupprimees || []; QUESTIONS_REMISES += restaurerQuestions(s); garderSecoursQ(s); // 28/11 : filet de sécurité des questions
   s.essVus = s.essVus || {}; s.prisesVues = s.prisesVues || null; s.alertesAbs = s.alertesAbs || []; if (!s.alertesInit) { s.alertesInit = true; const lim = new Date(Date.now() - 7 * 864e5).toISOString(); (s.journal || []).filter(j => j.date >= lim && / réintégrée automatiquement \(fin de /.test(j.texte || '')).forEach(j => { const a = (s.aesh || []).find(x => j.texte.startsWith(x.nom + ' réintégrée')); const m = j.texte.match(/fin de (.+?) le (\d\d)\/(\d\d)\/(\d{4})/), n = (j.texte.match(/archivés : (\d+)/) || [])[1]; if (a && m && !s.alertesAbs.some(x => x.id === 'retour-' + a.id + '-' + m[4] + '-' + m[3] + '-' + m[2])) s.alertesAbs.push({ id: 'retour-' + a.id + '-' + m[4] + '-' + m[3] + '-' + m[2], type: 'retour', le: j.date, vu: false, aeshId: a.id, fin: m[4] + '-' + m[3] + '-' + m[2], motif: m[1], n: n ? +n : 0 }); }); } s.essRappels = s.essRappels || {}; s.essNotif = s.essNotif || {};
   s.conseils = s.conseils || []; s.conseilsVus = s.conseilsVus || {}; s.conseilsNotif = s.conseilsNotif || {}; s.datesEtab = s.datesEtab || [];
+  if (restaurerVus(s)) VUS_REMIS = true; garderSecoursVus(s); // 28/11 : un « Vu » ne se perd plus
   if (!s.actuCite8) { s.actuCite8 = true; appliquerActuCite8(s); } // 22/11 : conseils du 1er trimestre (heures, salles) et dates de la cité, d'après l'Actu cité n° 8
   if (!s.datesExamsPaye2711) { s.datesExamsPaye2711 = true; appliquerDatesExamsPaye(s); } // 27/11 : examens 2027, dates de paye 2026-2027, DELF scolaire 2027
   s.segmentsRempl = s.segmentsRempl || [];
@@ -742,7 +782,7 @@ function numeroterFiches(s) {
   });
   return n;
 }
-function save() { reunirSyncEnAttente(); numeroterFiches(S); S._savedAt = new Date().toISOString(); const txt = JSON.stringify(S);
+function save() { reunirSyncEnAttente(); numeroterFiches(S); garderSecoursQ(S); garderSecoursVus(S); S._savedAt = new Date().toISOString(); const txt = JSON.stringify(S);
   try { localStorage.setItem(KEY, txt); }
   catch (err) { // mémoire du navigateur pleine : on allège le journal puis on réessaie ; sinon on le dit clairement
     if (S.journal && S.journal.length > 200) { S.journal.length = 200; try { localStorage.setItem(KEY, JSON.stringify(S)); toast('Journal raccourci pour libérer de la place'); } catch (e2) { return erreurEnregistrement(e2); } }
@@ -750,7 +790,8 @@ function save() { reunirSyncEnAttente(); numeroterFiches(S); S._savedAt = new Da
   const f = document.getElementById('savestate'); if (f) f.textContent = 'Enregistré ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function log(type, texte) { S.journal.unshift({ date: new Date().toISOString(), type, texte }); if (S.journal.length > 2000) S.journal.length = 2000; }
 function erreurEnregistrement(err) { console.error(err); const f = document.getElementById('savestate'); if (f) f.textContent = '⚠ Non enregistré';
-  alert("Attention : la modification est affichée mais n'a pas pu être enregistrée sur cet appareil (" + (err && (err.name || err.message) || err) + ").\nFais « Données & exports › Exporter JSON » pour ne rien perdre, puis préviens Claude."); }
+  // 28/11 : message dans l'appli (alert() est bloqué sur certains appareils : l'avertissement passait inaperçu)
+  demander("Attention : la modification est affichée mais n'a pas pu être enregistrée sur cet appareil (" + (err && (err.name || err.message) || err) + ").\nFais « Données & exports › Exporter JSON » pour ne rien perdre, puis préviens Claude.", { ok: 'Compris', annuler: null }); }
 function commit(type, texte) { if (texte) log(type, texte); save(); if (enChangement) renduBientot(); else render(); }
 // 20/11 : quand une modification vient d'un champ (heures, menu…), la page est redessinée juste après (le temps que le curseur
 // arrive dans le champ suivant) : rien ne bouge sous le curseur, et le champ suivant garde la main.
@@ -1425,7 +1466,49 @@ function majTitreEtBadge() {
 window.questionAjouter = () => { const t = ($('#q-texte').value || '').trim(); if (!t) { toast('Écris d\'abord la question'); $('#q-texte').focus(); return; } S.questions.unshift({ id: uid('q'), texte: t, pour: ($('#q-pour').value || '').trim(), lien: '', creeLe: aujourdhui(), fait: false, reponse: '' }); commit('question', 'Question ajoutée : ' + t.slice(0, 60)); };
 window.questionBascule = (id, v) => { const q = S.questions.find(x => x.id === id); if (!q) return; q.fait = !!v; commit('question', (v ? 'Question posée : ' : 'Question remise à poser : ') + q.texte.slice(0, 50)); };
 window.questionReponse = (id, v) => { const q = S.questions.find(x => x.id === id); if (!q) return; q.reponse = v.trim(); commit('question', 'Réponse notée : ' + q.texte.slice(0, 50)); };
-window.questionSupprimer = async id => { if (!(await demander('Supprimer cette question ?', { ok: 'Supprimer', danger: true }))) return; const q = S.questions.find(x => x.id === id); if (!q) return; S.questions = S.questions.filter(x => x.id !== id); commit('question', 'Question supprimée : ' + q.texte.slice(0, 50)); };
+window.questionSupprimer = async id => { if (!(await demander('Supprimer cette question ?', { ok: 'Supprimer', danger: true }))) return; const q = S.questions.find(x => x.id === id); if (!q) return; S.questions = S.questions.filter(x => x.id !== id); S.questionsSupprimees = [...new Set([...(S.questionsSupprimees || []), id])]; commit('question', 'Question supprimée : ' + q.texte.slice(0, 50)); };
+/* 28/11 : « Retrouver des questions perdues » : cherche sur CET appareil, dans toutes les copies gardées (avant synchro, avant import,
+   avant mise à jour d'EDT, réinitialisation, dernière version commune de la synchro) et dans l'historique (« Question ajoutée : … »),
+   les questions qui ne sont plus dans la liste et n'ont pas été supprimées avec ✕. Rien n'est remis sans un clic. */
+let QPERDUES = null;
+function lireBaseSync() { return new Promise(ok => { try { const minu = setTimeout(() => ok(null), 3000); const r = indexedDB.open('cockpit-sync', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onerror = () => { clearTimeout(minu); ok(null); };
+  r.onsuccess = () => { const db = r.result; try { const g = db.transaction('kv', 'readonly').objectStore('kv').get('base'); g.onsuccess = () => { clearTimeout(minu); db.close(); ok(g.result || null); }; g.onerror = () => { clearTimeout(minu); db.close(); ok(null); }; } catch (e) { clearTimeout(minu); db.close(); ok(null); } }; } catch (e) { ok(null); } }); }
+const SOURCES_Q = { 'cockpit-pas-v1-copie-avant-synchro': 'copie gardée avant une synchro', 'cockpit-pas-v1-copie-avant-v2': 'copie gardée au passage à la nouvelle synchro', 'cockpit-pas-v1-avant-import': 'copie avant un import', 'cockpit-pas-v1-avant-reinit': 'copie avant une réinitialisation', 'cockpit-pas-v1-avant-edt': 'copie avant une mise à jour d’EDT', 'cockpit-sync-base2': 'dernière version commune de la synchro', 'cockpit-questions-secours': 'filet de sécurité des questions', [KEY]: 'données actuelles' };
+window.chercherQuestionsPerdues = async () => {
+  const etats = [];
+  const ajouter = (txt, src) => { if (!txt || txt.length < 2) return; let o; try { o = JSON.parse(txt); } catch (e) { return; } if (!o || typeof o !== 'object') return;
+    if (o.etat && typeof o.etat === 'object') o = o.etat; if (src === Q_SECOURS) o = { questions: Object.values(o) }; if (Array.isArray(o.questions) || Array.isArray(o.journal)) etats.push({ o, src }); };
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k === KEY) continue; const v = localStorage.getItem(k); if (v && v.length > 20 && /questions|journal/.test(v.slice(0, 2000000))) ajouter(v, k); } } catch (e) { }
+  ajouter(await lireBaseSync(), 'cockpit-sync-base2'); etats.push({ o: S, src: KEY });
+  const ids = new Set(S.questions.map(q => q.id)), sup = new Set(S.questionsSupprimees || []), norm = t => String(t || '').trim().toLowerCase();
+  const textes = new Set(S.questions.map(q => norm(q.texte))), suppr = [];
+  etats.forEach(({ o }) => (o.journal || []).forEach(j => { const m = /^Question supprimée : ([\s\S]*)$/.exec(j.texte || ''); if (m) suppr.push(norm(m[1])); }));
+  const pleines = new Map(), partielles = new Map();
+  etats.forEach(({ o, src }) => (o.questions || []).forEach(q => { if (!q || !q.id || !q.texte || ids.has(q.id) || sup.has(q.id) || textes.has(norm(q.texte))) return; if (suppr.some(x => x && norm(q.texte).startsWith(x))) return;
+    const p = pleines.get(q.id); if (!p || (q.reponse || '').length > (p.q.reponse || '').length || (q.fait && !p.q.fait)) pleines.set(q.id, { q: { ...q }, src: SOURCES_Q[src] || src }); }));
+  const debutsPleins = [...S.questions.map(q => norm(q.texte)), ...[...pleines.values()].map(x => norm(x.q.texte))];
+  etats.forEach(({ o, src }) => (o.journal || []).forEach(j => { const m = /^Question ajoutée : ([\s\S]*)$/.exec(j.texte || ''); if (!m) return; const t = m[1].trim(), n = norm(t); if (!t) return;
+    if (debutsPleins.some(x => x.startsWith(n)) || suppr.some(x => x && n.startsWith(x)) || partielles.has(n)) return; partielles.set(n, { texte: t, le: (j.date || '').slice(0, 10), src: 'historique (' + (SOURCES_Q[src] || src) + ')', coupe: t.length >= 60 }); }));
+  QPERDUES = { pleines: [...pleines.values()], partielles: [...partielles.values()] };
+  if (!QPERDUES.pleines.length && !QPERDUES.partielles.length) { QPERDUES = null; await demander('Aucune question perdue n’a été trouvée sur cet appareil.\n\nFais la même recherche sur tes autres appareils (Mac, iPhone, iPad) : chacun garde ses propres copies.', { ok: 'Compris', annuler: null }); return; }
+  render();
+};
+window.questionRemettre = (i, partielle) => { if (!QPERDUES) return; const L = partielle ? QPERDUES.partielles : QPERDUES.pleines, x = L[i]; if (!x) return; L.splice(i, 1);
+  const q = partielle ? { id: uid('q'), texte: x.texte, pour: '', lien: '', creeLe: x.le || aujourdhui(), fait: false, reponse: '' } : x.q;
+  S.questions.unshift(q); if (!QPERDUES.pleines.length && !QPERDUES.partielles.length) QPERDUES = null; commit('question', 'Question retrouvée et remise : ' + q.texte.slice(0, 50)); };
+window.questionsToutRemettre = () => { if (!QPERDUES) return; const n = QPERDUES.pleines.length + QPERDUES.partielles.length;
+  QPERDUES.partielles.forEach(x => S.questions.unshift({ id: uid('q'), texte: x.texte, pour: '', lien: '', creeLe: x.le || aujourdhui(), fait: false, reponse: '' })); QPERDUES.pleines.forEach(x => S.questions.unshift(x.q));
+  QPERDUES = null; commit('question', `Questions retrouvées et remises : ${n}`); toast(`${n} question${n > 1 ? 's' : ''} remise${n > 1 ? 's' : ''}`); };
+window.questionsPerduesFermer = () => { QPERDUES = null; render(); };
+function carteQuestionsPerdues() {
+  if (!QPERDUES) return ''; const { pleines, partielles } = QPERDUES;
+  const ligne = (txt, info, i, p) => `<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--line,#e3e6ea)"><div style="flex:1"><div>${esc(txt)}</div><div class="small muted">${info}</div></div><button class="btn sm" onclick="questionRemettre(${i},${p})">Remettre</button></div>`;
+  return `<div class="card no-print" style="margin-bottom:14px;border:2px solid #E0A526"><h2>Questions retrouvées sur cet appareil <span class="pill warn">${pleines.length + partielles.length}</span></h2>
+    <p class="small muted" style="margin:0 0 6px">Elles ne sont plus dans ta liste et n’ont pas été supprimées avec ✕. Choisis celles à remettre.</p>
+    ${pleines.map((x, i) => ligne(x.q.texte, `${x.q.pour ? esc(x.q.pour) + ' · ' : ''}notée le ${frDate(x.q.creeLe)}${x.q.reponse ? ' · réponse : ' + esc(x.q.reponse) : ''} · trouvée dans : ${esc(x.src)}`, i, false)).join('')}
+    ${partielles.map((x, i) => ligne(x.texte + (x.coupe ? '…' : ''), `ajoutée le ${frDate(x.le)} · trouvée dans l’${esc(x.src)}${x.coupe ? ' · texte coupé après 60 caractères : complète-la après l’avoir remise (supprime-la et note-la en entier)' : ''}`, i, true)).join('')}
+    <div class="toolbar" style="margin-top:10px"><button class="btn primary" onclick="questionsToutRemettre()">Tout remettre</button><button class="btn ghost" onclick="questionsPerduesFermer()">Fermer</button></div></div>`;
+}
 function pageQuestions() {
   setTitle('Questions à poser');
   // une question cochée (ou décochée) reste à sa place pendant la visite de la page ; elle change de partie quand on rouvre la page
@@ -1435,8 +1518,8 @@ function pageQuestions() {
   const carte = q => `<div class="card" style="margin-bottom:10px;${q.fait ? 'opacity:.75' : ''}"><div style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" ${q.fait ? 'checked' : ''} onchange="questionBascule('${q.id}',this.checked)" title="Cochée = question posée" style="margin-top:4px"><div style="flex:1"><div>${esc(q.texte)}</div>
     <div class="small muted" style="margin-top:4px">${q.pour ? esc(q.pour) + ' · ' : ''}notée le ${frDate(q.creeLe)}${q.lien ? ` · <a href="${q.lien}">voir la fiche</a>` : ''}</div>
     <textarea placeholder="Réponse obtenue…" style="width:100%;margin-top:6px;min-height:42px" onchange="questionReponse('${q.id}',this.value)">${esc(q.reponse || '')}</textarea></div><button class="btn sm ghost no-print" onclick="questionSupprimer('${q.id}')" title="Supprimer">✕</button></div></div>`;
-  $('#page').innerHTML = `<div class="card" style="margin-bottom:14px"><h2>Noter une question</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><input id="q-texte" type="text" placeholder="Ma question…" style="flex:3;min-width:240px"><input id="q-pour" type="text" placeholder="Pour qui / quelle réunion" style="flex:1;min-width:160px"><button class="btn primary" onclick="questionAjouter()">Ajouter</button></div></div>
-    <h2>À poser <span class="pill ${a.length ? 'warn' : 'ok'}">${a.length}</span></h2>${a.map(carte).join('') || '<div class="empty">Aucune question en attente.</div>'}
+  $('#page').innerHTML = `<div class="card" style="margin-bottom:14px"><h2>Noter une question</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><input id="q-texte" type="text" placeholder="Ma question…" style="flex:3;min-width:240px"><input id="q-pour" type="text" placeholder="Pour qui / quelle réunion" style="flex:1;min-width:160px"><button class="btn primary" onclick="questionAjouter()">Ajouter</button></div><div class="no-print" style="margin-top:8px"><button class="btn sm ghost" onclick="chercherQuestionsPerdues()">🔎 Retrouver des questions perdues sur cet appareil</button></div></div>
+    ${carteQuestionsPerdues()}<h2>À poser <span class="pill ${a.length ? 'warn' : 'ok'}">${a.length}</span></h2>${a.map(carte).join('') || '<div class="empty">Aucune question en attente.</div>'}
     ${f.length ? `<h2 style="margin-top:18px">Déjà posées <span class="pill neutral">${f.length}</span></h2>${f.map(carte).join('')}` : ''}`;
 }
 /* ====================== ÉVALUATIONS (demandes d'AESH des enseignants, reçues par l'appli en ligne) ====================== */
@@ -3069,7 +3152,7 @@ window.qsqMailProf = () => {
 })();
 
 /* ====================== INIT ====================== */
-load(); if (NUMEROS_DONNES) { log('eleve', `Numéros de fiche donnés automatiquement : ${NUMEROS_DONNES} élève${NUMEROS_DONNES > 1 ? 's' : ''}`); save(); } if (DOUBLONS_FUSIONNES.length) { log('eleve', 'Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')); save(); setTimeout(() => toast('Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')), 800); } { const nd = appliquerDossiers() + appliquerEss() + appliquerStatuts(); if (nd) { log('eleve', 'Fiches élèves mises à jour d\'après les documents (PPS, MOPPS, notifications, GEVASCO…)'); save(); } } chargerDossiers(); if (synchroDispositifs()) { log('affectation', 'Élèves ULIS / SEGPA rattachés automatiquement aux AESH de leur dispositif'); save(); } render(); verifierRetours(); essVerifierRappel(); setInterval(essVerifierRappel, 60000); ccVerifierRappel(); setInterval(ccVerifierRappel, 60000);
+load(); if (QUESTIONS_REMISES || VUS_REMIS) { save(); } if (QUESTIONS_REMISES) { setTimeout(() => toast(`${QUESTIONS_REMISES} question${QUESTIONS_REMISES > 1 ? 's' : ''} à poser remise${QUESTIONS_REMISES > 1 ? 's' : ''} automatiquement`), 900); } QUESTIONS_REMISES = 0; if (NUMEROS_DONNES) { log('eleve', `Numéros de fiche donnés automatiquement : ${NUMEROS_DONNES} élève${NUMEROS_DONNES > 1 ? 's' : ''}`); save(); } if (DOUBLONS_FUSIONNES.length) { log('eleve', 'Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')); save(); setTimeout(() => toast('Doublons fusionnés : ' + DOUBLONS_FUSIONNES.join(', ')), 800); } { const nd = appliquerDossiers() + appliquerEss() + appliquerStatuts(); if (nd) { log('eleve', 'Fiches élèves mises à jour d\'après les documents (PPS, MOPPS, notifications, GEVASCO…)'); save(); } } chargerDossiers(); if (synchroDispositifs()) { log('affectation', 'Élèves ULIS / SEGPA rattachés automatiquement aux AESH de leur dispositif'); save(); } render(); verifierRetours(); essVerifierRappel(); setInterval(essVerifierRappel, 60000); ccVerifierRappel(); setInterval(ccVerifierRappel, 60000);
 setInterval(verifierRetours, 3600 * 1000); evalsActualiser(true); prisesActualiser(true); setInterval(() => { evalsActualiser(true); prisesActualiser(true); }, 120000); setTimeout(() => { if (serveurOK()) publierAuto(); }, 4000); setInterval(() => { if (serveurOK() && S.pubJour !== aujourdhui()) publierAuto(); }, 600000); document.addEventListener('visibilitychange', () => { if (!document.hidden) { verifierRetours(); chargerDossiers(); } });
 // Un clic sur « Synthèse » actualise toute l'application : relecture des fichiers de données (nouvelle version éventuelle) puis recalcul de toutes les pages. Les saisies sont déjà enregistrées, rien n'est perdu.
 const lienSynthese = document.querySelector('#nav a[href="#/synthese"]');
