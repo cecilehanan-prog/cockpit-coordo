@@ -802,6 +802,17 @@ function migrate(s) {
       s.affectations = (s.affectations || []).filter(x => !(x.eleveId === 'e80' && x.aeshId === 'a8'));
       s.creneaux = (s.creneaux || []).filter(x => !(x.eleveId === 'e80' && x.aeshId === 'a8'));
       (s.journal = s.journal || []).unshift({ date: new Date().toISOString(), type: 'eleve', texte: `${e.nom} ${e.prenom} : passe de la 6e 6 en 6e SEGPA (6e 7) ; AESH de la voie ordinaire retirée (${nA - s.affectations.length} affectation, ${nC - s.creneaux.length} créneaux)` }); } }
+  // 28/11, suite (décision de Hanan) : la classe est la 6e 1 SEGPA (supposée) ; ses AESH sont les AESH SEGPA (a20, a19) ; les 1,75 h et les 2 créneaux
+  // de l'AESH a8 (mardi 8h10-9h05, jeudi 13h00-13h55, 6e 6) passent à l'autre élève mutualisé de la 6e 6 (fiche e30), sans changer l'EDT de l'AESH. Une seule fois.
+  if (!s.passageSegpa2811b) { s.passageSegpa2811b = true; const e = (s.eleves || []).find(x => x.id === 'e80'), b = (s.eleves || []).find(x => x.id === 'e30' && x.classe === '6e 6');
+    if (e && e.site === 'SEGPA' && (e.classe === '6e 7' || e.classe === '6e 6')) e.classe = '6e 1';
+    if (e && e.site === 'SEGPA') ['a20', 'a19'].forEach(id => { if ((s.aesh || []).some(a => a.id === id) && !s.affectations.some(x => x.eleveId === 'e80' && x.aeshId === id)) s.affectations.push({ eleveId: 'e80', aeshId: id, heures: 0, aConfirmer: true }); });
+    if (b && (s.aesh || []).some(a => a.id === 'a8')) { let n = 0;
+      [[2, '08:10', '09:05', 'Maths Madi D134 (6e 6)'], [4, '13:00', '13:55', 'Français Bonnetain D133 (6e 6)']].forEach(([jour, debut, fin, matiere]) => {
+        if (s.creneaux.some(x => x.aeshId === 'a8' && +x.jour === jour && x.debut === debut && x.eleveId !== 'e80')) return; // déjà pris : on ne crée pas de doublon
+        s.creneaux.push({ id: 'k-segpa2811-' + jour, eleveId: 'e30', aeshId: 'a8', jour, debut, fin, matiere }); n++; });
+      const af = s.affectations.find(x => x.eleveId === 'e30' && x.aeshId === 'a8'); if (af) af.heures = Math.round(((+af.heures || 0) + 1.75) * 4) / 4; else s.affectations.push({ eleveId: 'e30', aeshId: 'a8', heures: 1.75, aConfirmer: false });
+      (s.journal = s.journal || []).unshift({ date: new Date().toISOString(), type: 'planning', texte: `${b.nom} ${b.prenom} : + 1,75 h et ${n} créneau${n > 1 ? 'x' : ''} repris de l'élève passée en SEGPA (même AESH, même emploi du temps)` }); } }
   if (!s.sortieTayara2611) { s.sortieTayara2611 = true; const L = s.aesh.filter(a => /\bTAYARA\b/i.test(a.nom || '')); if (L.length === 1 && !L[0].dateSortie) L[0].dateSortie = '2026-12-02'; }
   if (!s.couleurAli2511) { s.couleurAli2511 = true; s.aesh.forEach(a => { if (/\bnarya\b/i.test(a.nom || '') && /\bali\b/i.test(a.nom || '') && String(a.couleur || '').toUpperCase() === '#1F7A8C') a.couleur = '#C2477D'; }); }
   s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
