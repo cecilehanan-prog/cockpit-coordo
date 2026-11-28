@@ -787,7 +787,13 @@ function migrate(s) {
   // 25/11 : Narya ALI est en voie ordinaire, sa fiche doit être rose comme le reste de l'équipe en ordinaire (elle avait été créée en bleu). Une seule fois (drapeau couleurAli2511).
   // 26/11 : demande de Hanan, Khalida TAYARA (en arrêt longue durée) quitte l'équipe le 02/12/2026 : elle n'est plus comptée à partir de cette date.
   // Une seule fois (drapeau sortieTayara2611) ; une date déjà saisie dans sa fiche n'est pas écrasée. Sa fiche et son historique sont gardés.
-  if (!s.classeMac2611) { s.classeMac2611 = true; renommerMavEnMac(s); } // 26/11 : au lycée pro, la classe MAV s'appelle maintenant MAC (ex. 1MAV → 1MAC), partout
+  if (!s.classeMac2611) { s.classeMac2611 = true; renommerMavEnMac(s); }
+  // 28/11 (demande de Hanan) : la classe SEGPA « 5e (à préciser) » est la 5e 1 (d'après l'EDT Pronote reçu le 28/11). Une seule fois, ne touche qu'à cette classe-là.
+  if (!s.classe5e1Segpa2811) { s.classe5e1Segpa2811 = true; const AV = '5e (à préciser)'; let n = 0;
+    (s.eleves || []).forEach(e => { if (e.classe === AV && e.site === 'SEGPA') { e.classe = '5e 1'; n++; } });
+    (s.classes || []).forEach(c => { if (c.nom === AV && c.site === 'SEGPA') { if ((s.classes || []).some(x => x.nom === '5e 1' && x.site === 'SEGPA')) c.supprimer = true; else c.nom = '5e 1'; } });
+    s.classes = (s.classes || []).filter(c => !c.supprimer);
+    if (n) (s.journal = s.journal || []).unshift({ date: new Date().toISOString(), type: 'eleve', texte: 'Classe SEGPA « 5e (à préciser) » corrigée en « 5e 1 » (EDT Pronote du 28/11)' }); } // 26/11 : au lycée pro, la classe MAV s'appelle maintenant MAC (ex. 1MAV → 1MAC), partout
   if (!s.sortieTayara2611) { s.sortieTayara2611 = true; const L = s.aesh.filter(a => /\bTAYARA\b/i.test(a.nom || '')); if (L.length === 1 && !L[0].dateSortie) L[0].dateSortie = '2026-12-02'; }
   if (!s.couleurAli2511) { s.couleurAli2511 = true; s.aesh.forEach(a => { if (/\bnarya\b/i.test(a.nom || '') && /\bali\b/i.test(a.nom || '') && String(a.couleur || '').toUpperCase() === '#1F7A8C') a.couleur = '#C2477D'; }); }
   s.prisesOcc = s.prisesOcc || []; s.prisesRetirees = s.prisesRetirees || {}; s.serveur = s.serveur || { url: '', cle: '' }; s.evals = s.evals || { maj: '', demandes: [] }; s.evalsVues = s.evalsVues || [];
