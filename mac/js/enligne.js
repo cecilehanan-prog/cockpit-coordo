@@ -108,7 +108,38 @@ function lundiIso(date) { const d = new Date(date + 'T12:00'); d.setDate(d.getDa
 const K_HASH = 'cockpit-enligne-empreintes';
 let dernierHash = {}; try { dernierHash = JSON.parse(localStorage.getItem(K_HASH) || '{}'); } catch (e) {}
 let dernierRepublier = 0;
+/* 28/11 : les fiches des AESH (« liens AESH ») saturaient Firebase (2 457 enregistrements avant 10 h sur l'iMac).
+   Cause : quand Firebase est plein, un envoi groupé reste en attente (Firebase le garde et réessaie sans fin) et ne répond
+   jamais ; l'empreinte n'était donc pas retenue, et toutes les 2 minutes un NOUVEL envoi des ~25 fiches s'empilait. À la
+   remise à zéro du quota, tous ces envois en attente partaient d'un coup et resaturaient Firebase pour la journée.
+   Maintenant : un seul envoi à la fois, envoi direct (refus immédiat et clair si Firebase est plein, rien ne s'empile),
+   pause de 30 minutes après un refus. Pour les collègues, rien ne change : leur fiche est mise à jour dès qu'elle change. */
+let republierEnCours = null, pauseEcrituresJusqua = 0;
+function enValeur(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === 'string') return { stringValue: v };
+  if (Array.isArray(v)) return { arrayValue: v.length ? { values: v.map(enValeur) } : {} };
+  const f = {}; for (const [k, x] of Object.entries(v)) if (x !== undefined) f[k] = enValeur(x); return { mapValue: { fields: f } };
+}
+async function envoyerDocs(docs) { // docs : [{ path, data }] → un seul envoi direct (API web de Firestore)
+  const app = firebase.app(), pid = app.options.projectId, u = firebase.auth().currentUser; if (!u) throw new Error('pas connectée');
+  const tok = await u.getIdToken(), racineDocs = 'projects/' + pid + '/databases/(default)/documents';
+  const corps = { writes: docs.map(d => ({ update: { name: racineDocs + '/' + d.path, fields: enValeur(d.data).mapValue.fields } })) };
+  const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null, minu = setTimeout(() => ctl && ctl.abort(), 60000);
+  try {
+    const r = await fetchOrig('https://firestore.googleapis.com/v1/' + racineDocs + ':commit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify(corps), signal: ctl ? ctl.signal : undefined });
+    if (!r.ok) { let t = ''; try { t = (await r.text()).slice(0, 200); } catch (e) {} const e = new Error('envoi refusé (' + r.status + ') ' + t); e.quota = r.status === 429 || /RESOURCE_EXHAUSTED/.test(t); throw e; }
+    docs.forEach(d => compter(d.path));
+  } finally { clearTimeout(minu); }
+}
 async function republier(db, cfg, ctx) {
+  if (republierEnCours) return 0; // un envoi est déjà en route : on ne l'empile pas
+  republierEnCours = republierUneFois(db, cfg, ctx);
+  try { return await republierEnCours; } finally { republierEnCours = null; }
+}
+async function republierUneFois(db, cfg, ctx) {
   const conf = ctx.conf || await lireConfig(db, cfg);
   const pubS = await racine(db, cfg).collection('admin').doc('publication').get(), pub = pubS.exists ? pubS.data().p : null;
   const R = ctx.R || await lireReponses(db, cfg), prises = await lirePrises(db, cfg), cand = plierCandidatures(R);
@@ -120,7 +151,7 @@ async function republier(db, cfg, ctx) {
   const lienFiche = n => window.fichesEnLigne && F.code ? window.fichesEnLigne.lien(cfg.e, n) : siteFiches() + '#' + n;
   const numEleve = crId => { const c = (S().creneaux || []).find(x => x.id === crId); return (c && (F.codes || {})[c.eleveId]) || ''; };
   const occ = (pub && pub.occurrences || []).filter(o => o.date >= auj()).map(o => { const p = prises[o.id]; return { id: o.id, creneauId: o.creneauId, date: o.date, debut: o.debut, fin: o.fin, semaine: o.semaine || '', eleve: numEleve(o.creneauId), fiche: numEleve(o.creneauId) ? lienFiche(numEleve(o.creneauId)) : '', site: o.site || '', matiere: o.matiere || '', absent: nomA(o.absentId), prisPar: p && !p.annulee ? p.aeshId : null, prisParNom: p && !p.annulee ? nomA(p.aeshId) : '' }; });
-  const batch = db.batch(), aMettre = {}; let n = 0;
+  const aEnvoyer = [], aMettre = {}; let n = 0;
   for (const a of equipeA()) {
     const cle = conf.membres[a.id]; if (!cle) continue;
     const dem = D.filter(d => d.date >= auj() && (d.statut === 'proposee' && (!d.visibleA || d.visibleA.includes(a.id)) || d.statut === 'acceptee' && d.aeshId === a.id))
@@ -128,11 +159,24 @@ async function republier(db, cfg, ctx) {
     const occupations = (S().creneaux || []).filter(c => c.aeshId === a.id || c.remplacantId === a.id).map(c => ({ jour: c.jour, debut: c.debut, fin: c.fin, groupe: c.groupe || null }));
     const doc = { aeshId: a.id, nom: a.nom, absente: !!(a.statut && a.statut !== 'Actif'), creneaux: occ, demandes: dem, occupations, quinzaines: (pub && pub.quinzaines) || {} };
     const h = JSON.stringify(doc); if (dernierHash[cle] === h) continue; aMettre[cle] = h;
-    batch.set(racine(db, cfg).collection('membres').doc(cle), Object.assign(doc, { maj: new Date().toISOString() })); n++;
+    aEnvoyer.push({ path: racine(db, cfg).collection('membres').doc(cle).path, data: Object.assign(doc, { maj: new Date().toISOString() }) }); n++;
   }
-  if (n) { await batch.commit(); Object.assign(dernierHash, aMettre); try { localStorage.setItem(K_HASH, JSON.stringify(dernierHash)); } catch (e) {} }
+  if (n && Date.now() < pauseEcrituresJusqua) n = 0; // Firebase plein : on réessaiera après la pause (les empreintes ne bougent pas)
+  else if (n) {
+    let ok = false;
+    try { await envoyerDocs(aEnvoyer); ok = true; }
+    catch (e) {
+      if (e.quota) { pauseEcrituresJusqua = Date.now() + 30 * 60000; console.warn('liens AESH : Firebase plein, nouvel essai dans 30 min'); }
+      else if (e.name === 'AbortError' || /refusé/.test(e.message || '')) console.warn('liens AESH', e);
+      else try { // envoi direct impossible sur ce réseau : envoi normal, sans jamais attendre plus d'une minute (sinon pause : rien ne s'empile)
+        const batch = db.batch(); aEnvoyer.forEach(d => batch.set(db.doc(d.path), d.data));
+        await Promise.race([batch.commit(), new Promise((_, ko) => setTimeout(() => ko(new Error('envoi sans réponse')), 60000))]); ok = true;
+      } catch (e2) { pauseEcrituresJusqua = Date.now() + 30 * 60000; console.warn('liens AESH', e2); }
+    }
+    if (ok) { Object.assign(dernierHash, aMettre); try { localStorage.setItem(K_HASH, JSON.stringify(dernierHash)); } catch (e) {} } else n = 0;
+  }
   dernierRepublier = Date.now();
-  if (window.fichesEnLigne) await window.fichesEnLigne.publier(db, racine(db, cfg)); // ne publie que si les fiches ont changé
+  if (window.fichesEnLigne && Date.now() >= pauseEcrituresJusqua) await Promise.race([window.fichesEnLigne.publier(db, racine(db, cfg)), new Promise(ok => setTimeout(() => ok(false), 60000))]); // ne publie que si les fiches ont changé
   return n;
 }
 
